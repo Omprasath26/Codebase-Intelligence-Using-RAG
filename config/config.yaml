@@ -1,0 +1,27 @@
+repository:
+  url: "https://github.com/scrapy/scrapy"
+  ref: "master"
+
+ingestion:
+  max_file_size_bytes: 1048576
+
+  allowed_extensions:
+    - ".py"
+    - ".md"
+    - ".rst"
+    - ".toml"
+    - ".yaml"
+    - ".yml"
+    - ".json"
+    - ".ini"
+    - ".cfg"
+    - ".txt"
+
+  excluded_directories:
+    - ".git"
+    - "__pycache__"
+    - ".pytest_cache"
+    - "build"
+    - "dist"
+    - "vendor"
+    

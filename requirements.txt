@@ -1,0 +1,20 @@
+# Codebase Intelligence System Using RAG
+# Problem Statement 1 — Repository Ingestion & Knowledge Acquisition
+# Python 3.10+
+
+# GitHub REST API / repository integration
+requests>=2.31,<3.0
+
+# Configuration and environment-based secret management
+PyYAML>=6.0,<7.0
+python-dotenv>=1.0,<2.0
+
+# Normalized data contracts / metadata models
+pydantic>=2.7,<3.0
+
+# Bounded retries and backoff for API/network failures
+tenacity>=8.2,<10.0
+
+# Testing
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<7.0

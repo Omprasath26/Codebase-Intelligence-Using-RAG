@@ -35,7 +35,13 @@ class RepositoryArtifact(BaseModel):
     source_url: str | None = None
     content: str
     language: str | None = None
+
+    # Repository revision used for this ingestion.
     commit_sha: str | None = None
+
+    # Exact GitHub file/blob/object revision when available.
+    source_sha: str | None = None
+
     ref: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -47,8 +53,13 @@ class IngestionControl:
     """Filters, classifies, and normalizes raw repository artifacts."""
 
     _SECRET_PATTERNS = (
-        re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-        re.compile(r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*['\"]?[\w\-\/+=]{16,}"),
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+        ),
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)"
+            r"\s*[:=]\s*['\"]?[\w\-\/+=]{16,}"
+        ),
         re.compile(r"(?i)\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     )
 
@@ -112,7 +123,6 @@ class IngestionControl:
         """Determine whether a repository path represents a test."""
 
         parts = path.lower().split("/")
-
         filename = parts[-1] if parts else ""
 
         return (
@@ -257,6 +267,8 @@ class IngestionControl:
             timezone.utc
         )
 
+        source_sha = raw_artifact.get("sha")
+
         return RepositoryArtifact(
             stable_id=stable_id,
             repository=repository,
@@ -266,6 +278,7 @@ class IngestionControl:
             content=content,
             language=raw_artifact.get("language"),
             commit_sha=commit_sha,
+            source_sha=source_sha,
             ref=ref,
             created_at=self._parse_timestamp(
                 raw_artifact.get("created_at")
@@ -275,7 +288,6 @@ class IngestionControl:
             ),
             ingestion_timestamp=ingestion_timestamp,
             metadata={
-                "source_sha": raw_artifact.get("sha"),
                 "size": raw_artifact.get("size"),
             },
         )
@@ -316,6 +328,7 @@ class IngestionControl:
             content=content,
             language=None,
             commit_sha=raw_artifact.get("commit_sha"),
+            source_sha=raw_artifact.get("sha"),
             ref=ref,
             created_at=self._parse_timestamp(
                 raw_artifact.get("created_at")

@@ -153,10 +153,42 @@ def test_normalizes_file_with_provenance() -> None:
     assert artifact.artifact_type == "code"
     assert artifact.source_path_or_object_id == "scrapy/core.py"
     assert artifact.source_url is not None
+
+    # Repository revision.
     assert artifact.commit_sha == "abc123"
+
+    # Exact GitHub file/blob revision.
+    assert artifact.source_sha == "file-sha"
+
     assert artifact.ref == "master"
     assert artifact.content == "print('hello')"
+    assert artifact.metadata["size"] == 20
+    assert "source_sha" not in artifact.metadata
     assert artifact.stable_id
+
+
+def test_normalizes_github_artifact_with_source_sha() -> None:
+    controller = IngestionControl(make_settings())
+
+    artifact = controller.normalize_github_artifact(
+        raw_artifact={
+            "id": 123,
+            "sha": "object-sha",
+            "body": "Example issue",
+            "html_url": (
+                "https://github.com/scrapy/scrapy/issues/123"
+            ),
+        },
+        repository="scrapy/scrapy",
+        ref="master",
+        artifact_type="issue",
+        object_id="123",
+    )
+
+    assert artifact.artifact_type == "issue"
+    assert artifact.source_path_or_object_id == "123"
+    assert artifact.source_sha == "object-sha"
+    assert artifact.content == "Example issue"
 
 
 def test_stable_id_is_deterministic() -> None:

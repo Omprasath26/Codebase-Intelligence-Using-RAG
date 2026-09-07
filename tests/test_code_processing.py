@@ -2,11 +2,7 @@ from src.code_processing import CodeProcessing
 from src.ingestion_control import RepositoryArtifact
 
 
-def make_artifact(
-    artifact_type: str,
-    content: str,
-    path: str,
-) -> RepositoryArtifact:
+def make_artifact(artifact_type: str,content: str,path: str) -> RepositoryArtifact:
     return RepositoryArtifact(
         stable_id="artifact-123",
         repository="scrapy/scrapy",

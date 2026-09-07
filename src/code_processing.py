@@ -39,10 +39,7 @@ class KnowledgeChunk(BaseModel):
 class CodeProcessing:
     """Parse normalized artifacts and produce structural knowledge chunks."""
 
-    def process(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> list[KnowledgeChunk]:
+    def process(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Process one normalized repository artifact."""
 
         if artifact.artifact_type in {"code", "test"}:
@@ -56,10 +53,7 @@ class CodeProcessing:
 
         return self._process_other_artifact(artifact)
 
-    def _process_python(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> list[KnowledgeChunk]:
+    def _process_python(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Parse Python code or tests and create structural chunks."""
 
         try:
@@ -127,14 +121,7 @@ class CodeProcessing:
 
         return chunks
 
-    def _process_python_node(
-        self,
-        artifact: RepositoryArtifact,
-        node: ast.AST,
-        module: str,
-        imports: list[str],
-        parent_symbol: str | None,
-    ) -> list[KnowledgeChunk]:
+    def _process_python_node(self,artifact: RepositoryArtifact,node: ast.AST,module: str,imports: list[str],parent_symbol: str | None) -> list[KnowledgeChunk]:
         """Create a chunk for a Python class/function and its children."""
 
         start_line = getattr(node, "lineno", None)
@@ -191,10 +178,7 @@ class CodeProcessing:
 
         return chunks
 
-    def _extract_module_imports(
-        self,
-        tree: ast.Module,
-    ) -> list[str]:
+    def _extract_module_imports(self,tree: ast.Module,) -> list[str]:
         """Extract imports declared at module level."""
 
         imports: list[str] = []
@@ -219,10 +203,7 @@ class CodeProcessing:
 
         return sorted(set(imports))
 
-    def _process_documentation(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> list[KnowledgeChunk]:
+    def _process_documentation(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Split Markdown or RST documentation into structural sections."""
 
         lines = artifact.content.splitlines()
@@ -269,8 +250,7 @@ class CodeProcessing:
 
         if first_heading_line > 1:
             preamble = "\n".join(
-                lines[:first_heading_line - 1]
-            ).strip()
+                lines[:first_heading_line - 1]).strip()
 
             if preamble:
                 chunks.append(
@@ -296,8 +276,7 @@ class CodeProcessing:
                 end_line = len(lines)
 
             content = "\n".join(
-                lines[start_line - 1:end_line]
-            ).strip()
+                lines[start_line - 1:end_line]).strip()
 
             chunks.append(
                 self._create_chunk(
@@ -317,10 +296,7 @@ class CodeProcessing:
 
         return chunks
 
-    def _find_documentation_headings(
-        self,
-        lines: list[str],
-    ) -> list[tuple[int, str]]:
+    def _find_documentation_headings(self,lines: list[str]) -> list[tuple[int, str]]:
         """Find Markdown and simple RST-style documentation headings."""
 
         headings: list[tuple[int, str]] = []
@@ -345,8 +321,7 @@ class CodeProcessing:
                 index + 1 < len(lines)
                 and line.strip()
                 and re.fullmatch(r"\s*[=\-~^]+", lines[index + 1])
-                and len(lines[index + 1].strip()) >= len(line.strip())
-            ):
+                and len(lines[index + 1].strip()) >= len(line.strip())):
                 headings.append(
                     (
                         index + 1,
@@ -356,10 +331,7 @@ class CodeProcessing:
 
         return headings
 
-    def _process_configuration(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> list[KnowledgeChunk]:
+    def _process_configuration(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Create a structured chunk for a configuration artifact."""
 
         return [
@@ -378,10 +350,7 @@ class CodeProcessing:
             )
         ]
 
-    def _process_other_artifact(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> list[KnowledgeChunk]:
+    def _process_other_artifact(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Create a knowledge chunk for a non-code normalized artifact."""
 
         return [
@@ -400,17 +369,7 @@ class CodeProcessing:
             )
         ]
 
-    def _create_chunk(
-        self,
-        artifact: RepositoryArtifact,
-        content: str,
-        start_line: int | None,
-        end_line: int | None,
-        symbol: str | None,
-        parent_symbol: str | None,
-        module: str | None,
-        metadata: dict[str, Any],
-    ) -> KnowledgeChunk:
+    def _create_chunk(self,artifact: RepositoryArtifact,content: str,start_line: int | None,end_line: int | None,symbol: str | None,parent_symbol: str | None,module: str | None,metadata: dict[str, Any]) -> KnowledgeChunk:
         """Create a chunk while preserving artifact provenance."""
 
         identity = "|".join(
@@ -449,10 +408,7 @@ class CodeProcessing:
             },
         )
 
-    def _module_name(
-        self,
-        artifact: RepositoryArtifact,
-    ) -> str:
+    def _module_name(self,artifact: RepositoryArtifact) -> str:
         """Convert a Python repository path into a module-style name."""
 
         path = artifact.source_path_or_object_id.replace("\\", "/")
@@ -462,10 +418,7 @@ class CodeProcessing:
 
         return path.replace("/", ".")
 
-    def _line_count(
-        self,
-        content: str,
-    ) -> int:
+    def _line_count(self,content: str) -> int:
         """Return the number of lines in content."""
 
         return len(content.splitlines()) or 1

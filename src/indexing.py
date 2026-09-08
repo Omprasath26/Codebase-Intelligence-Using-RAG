@@ -32,21 +32,14 @@ class IndexMetadata:
 class Indexing:
     """Generate embeddings and build FAISS and BM25 indexes."""
 
-    def __init__(
-        self,
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        index_version: str = "v1",
-    ) -> None:
+    def __init__(self,embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",index_version: str = "v1") -> None:
         self.embedding_model_name = embedding_model
         self.index_version = index_version
         self.embedding_model = SentenceTransformer(
             embedding_model
         )
 
-    def build(
-        self,
-        chunks: list[KnowledgeChunk],
-    ) -> dict[str, Any]:
+    def build(self,chunks: list[KnowledgeChunk]) -> dict[str, Any]:
         """Build deterministic vector and lexical indexes."""
 
         if not chunks:
@@ -106,10 +99,7 @@ class Indexing:
             "metadata": metadata,
         }
 
-    def _generate_embeddings(
-        self,
-        texts: list[str],
-    ) -> np.ndarray:
+    def _generate_embeddings(self,texts: list[str]) -> np.ndarray:
         """Generate normalized embeddings for index construction."""
 
         embeddings = self.embedding_model.encode(
@@ -124,10 +114,7 @@ class Indexing:
             dtype=np.float32,
         )
 
-    def _build_faiss_index(
-        self,
-        embeddings: np.ndarray,
-    ) -> faiss.Index:
+    def _build_faiss_index(self,embeddings: np.ndarray) -> faiss.Index:
         """Build a cosine-similarity FAISS index."""
 
         dimension = embeddings.shape[1]
@@ -137,10 +124,7 @@ class Indexing:
 
         return index
 
-    def _build_bm25_index(
-        self,
-        texts: list[str],
-    ) -> BM25Okapi:
+    def _build_bm25_index(self,texts: list[str]) -> BM25Okapi:
         """Build a BM25 lexical index."""
 
         tokenized_documents = [
@@ -150,10 +134,7 @@ class Indexing:
 
         return BM25Okapi(tokenized_documents)
 
-    def _build_index_text(
-        self,
-        chunk: KnowledgeChunk,
-    ) -> str:
+    def _build_index_text(self,chunk: KnowledgeChunk) -> str:
         """Create deterministic searchable text from a knowledge chunk."""
 
         searchable_metadata = [
@@ -177,10 +158,7 @@ class Indexing:
             ]
         )
 
-    def _metadata_search_text(
-        self,
-        metadata: dict[str, Any],
-    ) -> str:
+    def _metadata_search_text(self,metadata: dict[str, Any]) -> str:
         """Convert enriched metadata into deterministic searchable text."""
 
         values: list[str] = []
@@ -214,10 +192,7 @@ class Indexing:
 
         return "\n".join(values)
 
-    def _tokenize(
-        self,
-        text: str,
-    ) -> list[str]:
+    def _tokenize(self,text: str) -> list[str]:
         """Tokenize text for lexical retrieval."""
 
         return re.findall(
@@ -225,10 +200,7 @@ class Indexing:
             text.lower(),
         )
 
-    def _chunk_metadata(
-        self,
-        chunk: KnowledgeChunk,
-    ) -> dict[str, Any]:
+    def _chunk_metadata(self,chunk: KnowledgeChunk) -> dict[str, Any]:
         """Preserve chunk provenance and searchable metadata."""
 
         return {
@@ -251,10 +223,7 @@ class Indexing:
             "metadata": dict(chunk.metadata),
         }
 
-    def build_id(
-        self,
-        chunks: list[KnowledgeChunk],
-    ) -> str:
+    def build_id(self,chunks: list[KnowledgeChunk]) -> str:
         """Generate a deterministic identifier for an index build."""
 
         ordered_ids = sorted(

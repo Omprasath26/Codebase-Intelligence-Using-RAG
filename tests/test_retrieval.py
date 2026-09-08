@@ -35,6 +35,7 @@ def create_chunk(
 
 def create_retrieval(
     chunks: list[KnowledgeChunk],
+    reranker=None,
 ) -> Retrieval:
     faiss_index = MagicMock()
     faiss_index.ntotal = len(chunks)
@@ -73,6 +74,7 @@ def create_retrieval(
         return Retrieval(
             index_state=index_state,
             embedding_model="test-model",
+            reranker=reranker,
         )
 
 
@@ -85,6 +87,9 @@ def create_query(
         intent="general",
         symbols=[],
         paths=[],
+        error_messages=[],
+        issue_numbers=[],
+        pr_numbers=[],
     )
 
 
@@ -94,6 +99,23 @@ def test_rejects_empty_index_state() -> None:
         match="Index state cannot be empty",
     ):
         Retrieval(index_state={})
+
+
+def test_rejects_missing_index_state_keys() -> None:
+    faiss_index = MagicMock()
+    faiss_index.ntotal = 0
+
+    with patch("src.retrieval.SentenceTransformer"):
+        with pytest.raises(
+            ValueError,
+            match="Index state is missing required keys",
+        ):
+            Retrieval(
+                index_state={
+                    "faiss": faiss_index,
+                },
+                embedding_model="test-model",
+            )
 
 
 def test_rejects_inconsistent_index_size() -> None:
@@ -117,6 +139,39 @@ def test_rejects_inconsistent_index_size() -> None:
         with pytest.raises(
             ValueError,
             match="FAISS index size does not match chunk count",
+        ):
+            Retrieval(
+                index_state={
+                    "faiss": faiss_index,
+                    "bm25": bm25_index,
+                    "chunks": chunks,
+                    "chunk_metadata": {
+                        0: {},
+                    },
+                },
+                embedding_model="test-model",
+            )
+
+
+def test_rejects_missing_chunk_metadata() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        )
+    ]
+
+    faiss_index = MagicMock()
+    faiss_index.ntotal = 1
+
+    bm25_index = MagicMock()
+
+    with patch("src.retrieval.SentenceTransformer"):
+        with pytest.raises(
+            ValueError,
+            match="Chunk metadata is missing",
         ):
             Retrieval(
                 index_state={
@@ -170,6 +225,31 @@ def test_fuses_dense_and_bm25_results() -> None:
 
     assert len(results) == 2
     assert results[0].retrieval_method == "bm25+dense"
+    assert results[0].dense_score is not None
+    assert results[0].bm25_score is not None
+
+
+def test_preserves_single_retrieval_method_scores() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        )
+    ]
+
+    retrieval = create_retrieval(chunks)
+
+    results = retrieval._fuse_results(
+        [(0, 0.9)],
+        [],
+    )
+
+    assert len(results) == 1
+    assert results[0].retrieval_method == "dense"
+    assert results[0].dense_score == 0.9
+    assert results[0].bm25_score is None
 
 
 def test_returns_top_k_results() -> None:
@@ -206,9 +286,49 @@ def test_returns_top_k_results() -> None:
     results = retrieval.retrieve(
         create_query(),
         top_k=2,
+        rerank=False,
     )
 
     assert len(results) == 2
+
+
+def test_candidate_k_controls_search_stage() -> None:
+    chunks = [
+        create_chunk(
+            f"chunk-{index}",
+            f"Symbol{index}",
+            f"module{index}.py",
+            f"content {index}",
+        )
+        for index in range(5)
+    ]
+
+    retrieval = create_retrieval(chunks)
+
+    retrieval._dense_search = MagicMock(
+        return_value=[(0, 0.9)]
+    )
+
+    retrieval._bm25_search = MagicMock(
+        return_value=[(0, 4.0)]
+    )
+
+    retrieval.retrieve(
+        create_query(),
+        top_k=2,
+        candidate_k=3,
+        rerank=False,
+    )
+
+    retrieval._dense_search.assert_called_once_with(
+        "parse response",
+        3,
+    )
+
+    retrieval._bm25_search.assert_called_once_with(
+        "parse response",
+        3,
+    )
 
 
 def test_applies_metadata_filter() -> None:
@@ -249,10 +369,44 @@ def test_applies_metadata_filter() -> None:
         metadata_filters={
             "symbol": "Request",
         },
+        rerank=False,
     )
 
     assert len(results) == 1
     assert results[0].chunk.symbol == "Request"
+
+
+def test_applies_multiple_metadata_filters() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        ),
+        create_chunk(
+            "chunk-2",
+            "Response",
+            "scrapy/http/response.py",
+            "class Response:",
+        ),
+    ]
+
+    retrieval = create_retrieval(chunks)
+
+    results = retrieval._apply_metadata_filters(
+        retrieval._fuse_results(
+            [(0, 0.9), (1, 0.8)],
+            [(0, 4.0), (1, 3.0)],
+        ),
+        {
+            "artifact_type": "code",
+            "language": "python",
+            "repository": "scrapy/scrapy",
+        },
+    )
+
+    assert len(results) == 2
 
 
 def test_preserves_provenance() -> None:
@@ -278,6 +432,7 @@ def test_preserves_provenance() -> None:
     results = retrieval.retrieve(
         create_query(),
         top_k=1,
+        rerank=False,
     )
 
     evidence = results[0]
@@ -324,3 +479,241 @@ def test_rejects_invalid_top_k() -> None:
             create_query(),
             top_k=0,
         )
+
+
+def test_rejects_invalid_candidate_k() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        )
+    ]
+
+    retrieval = create_retrieval(chunks)
+
+    with pytest.raises(
+        ValueError,
+        match="candidate_k must be greater than zero",
+    ):
+        retrieval.retrieve(
+            create_query(),
+            candidate_k=0,
+        )
+
+
+def test_rejects_invalid_rerank_k() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        )
+    ]
+
+    retrieval = create_retrieval(chunks)
+
+    with pytest.raises(
+        ValueError,
+        match="rerank_k must be greater than zero",
+    ):
+        retrieval.retrieve(
+            create_query(),
+            rerank_k=0,
+        )
+
+
+def test_reranks_merged_candidate_set() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        ),
+        create_chunk(
+            "chunk-2",
+            "Response",
+            "scrapy/http/response.py",
+            "class Response:",
+        ),
+        create_chunk(
+            "chunk-3",
+            "Crawler",
+            "scrapy/core/crawler.py",
+            "class Crawler:",
+        ),
+    ]
+
+    reranker = MagicMock()
+
+    reranker.predict.return_value = [
+        0.20,
+        0.95,
+        0.50,
+    ]
+
+    retrieval = create_retrieval(
+        chunks,
+        reranker=reranker,
+    )
+
+    retrieval._dense_search = MagicMock(
+        return_value=[
+            (0, 0.95),
+            (1, 0.90),
+            (2, 0.85),
+        ]
+    )
+
+    retrieval._bm25_search = MagicMock(
+        return_value=[
+            (0, 5.0),
+            (1, 4.0),
+            (2, 3.0),
+        ]
+    )
+
+    results = retrieval.retrieve(
+        create_query("request processing"),
+        top_k=3,
+    )
+
+    assert [result.chunk.stable_id for result in results] == [
+        "chunk-2",
+        "chunk-3",
+        "chunk-1",
+    ]
+
+    assert results[0].rerank_score == 0.95
+    assert results[0].retrieval_method == "bm25+dense+reranker"
+
+    reranker.predict.assert_called_once()
+
+
+def test_reranking_can_be_disabled() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        ),
+        create_chunk(
+            "chunk-2",
+            "Response",
+            "scrapy/http/response.py",
+            "class Response:",
+        ),
+    ]
+
+    reranker = MagicMock()
+    reranker.predict.return_value = [0.1, 0.9]
+
+    retrieval = create_retrieval(
+        chunks,
+        reranker=reranker,
+    )
+
+    retrieval._dense_search = MagicMock(
+        return_value=[
+            (0, 0.95),
+            (1, 0.90),
+        ]
+    )
+
+    retrieval._bm25_search = MagicMock(
+        return_value=[
+            (0, 5.0),
+            (1, 4.0),
+        ]
+    )
+
+    results = retrieval.retrieve(
+        create_query(),
+        top_k=2,
+        rerank=False,
+    )
+
+    assert results[0].chunk.stable_id == "chunk-1"
+    reranker.predict.assert_not_called()
+
+
+def test_rerank_k_limits_reranker_candidates() -> None:
+    chunks = [
+        create_chunk(
+            f"chunk-{index}",
+            f"Symbol{index}",
+            f"module{index}.py",
+            f"content {index}",
+        )
+        for index in range(3)
+    ]
+
+    reranker = MagicMock()
+    reranker.predict.return_value = [0.2, 0.9]
+
+    retrieval = create_retrieval(
+        chunks,
+        reranker=reranker,
+    )
+
+    fused_results = retrieval._fuse_results(
+        [
+            (0, 0.9),
+            (1, 0.8),
+            (2, 0.7),
+        ],
+        [
+            (0, 4.0),
+            (1, 3.0),
+            (2, 2.0),
+        ],
+    )
+
+    results = retrieval._rerank_results(
+        "request processing",
+        fused_results,
+        rerank_k=2,
+    )
+
+    assert len(results) == 3
+
+    pairs = reranker.predict.call_args.args[0]
+
+    assert len(pairs) == 2
+
+
+def test_reranker_preserves_retrieval_scores() -> None:
+    chunks = [
+        create_chunk(
+            "chunk-1",
+            "Request",
+            "scrapy/http/request.py",
+            "class Request:",
+        )
+    ]
+
+    reranker = MagicMock()
+    reranker.predict.return_value = [0.88]
+
+    retrieval = create_retrieval(
+        chunks,
+        reranker=reranker,
+    )
+
+    fused_results = retrieval._fuse_results(
+        [(0, 0.9)],
+        [(0, 4.0)],
+    )
+
+    result = retrieval._rerank_results(
+        "request",
+        fused_results,
+    )[0]
+
+    assert result.dense_score == 0.9
+    assert result.bm25_score == 4.0
+    assert result.rerank_score == 0.88

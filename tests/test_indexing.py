@@ -8,6 +8,7 @@ def make_chunk(
     stable_id: str,
     content: str,
     symbol: str | None = None,
+    metadata: dict | None = None,
 ) -> KnowledgeChunk:
     return KnowledgeChunk(
         stable_id=stable_id,
@@ -28,7 +29,7 @@ def make_chunk(
         module="scrapy.example",
         symbol=symbol,
         parent_symbol=None,
-        metadata={},
+        metadata=metadata or {},
     )
 
 
@@ -106,6 +107,36 @@ def test_preserves_chunk_metadata() -> None:
     assert metadata["ref"] == "master"
 
 
+def test_preserves_enriched_chunk_metadata() -> None:
+    indexer = Indexing()
+
+    chunk_metadata = {
+        "symbol_type": "function",
+        "package": "scrapy.example",
+        "imports": [
+            "scrapy",
+            "typing",
+        ],
+        "parent_child_relationship": {
+            "parent": None,
+            "children": [],
+        },
+    }
+
+    chunk = make_chunk(
+        stable_id="chunk-1",
+        content="def hello(): return True",
+        symbol="hello",
+        metadata=chunk_metadata,
+    )
+
+    state = indexer.build([chunk])
+
+    metadata = state["chunk_metadata"][0]
+
+    assert metadata["metadata"] == chunk_metadata
+
+
 def test_index_metadata_contains_version_information() -> None:
     indexer = Indexing(
         index_version="v1"
@@ -161,6 +192,38 @@ def test_build_is_deterministic_for_same_chunks() -> None:
         second["embeddings"],
     )
 
+    assert first["chunk_id_by_position"] == (
+        second["chunk_id_by_position"]
+    )
+
+
+def test_chunk_position_mapping_matches_sorted_chunks() -> None:
+    indexer = Indexing()
+
+    chunks = [
+        make_chunk(
+            stable_id="chunk-2",
+            content="def crawl(): return response",
+            symbol="crawl",
+        ),
+        make_chunk(
+            stable_id="chunk-1",
+            content="def hello(): return True",
+            symbol="hello",
+        ),
+    ]
+
+    state = indexer.build(chunks)
+
+    assert state["chunks"][0].stable_id == "chunk-1"
+    assert state["chunks"][1].stable_id == "chunk-2"
+
+    assert state["chunk_id_by_position"] == {
+        0: "chunk-1",
+        1: "chunk-2",
+    }
+
+
 def test_bm25_contains_all_chunk_documents() -> None:
     indexer = Indexing()
 
@@ -197,3 +260,60 @@ def test_bm25_contains_all_chunk_documents() -> None:
     assert scores[0] > scores[1]
     assert scores[0] > scores[2]
     assert scores[0] > scores[3]
+
+
+def test_bm25_includes_enriched_metadata() -> None:
+    indexer = Indexing()
+
+    chunks = [
+        make_chunk(
+            stable_id="chunk-1",
+            content="return response",
+            symbol="crawl",
+            metadata={
+                "api_name": "HtmlResponse",
+                "symbol_type": "function",
+            },
+        ),
+        make_chunk(
+            stable_id="chunk-2",
+            content="return request",
+            symbol="parse",
+            metadata={
+                "api_name": "Request",
+                "symbol_type": "function",
+            },
+        ),
+        make_chunk(
+            stable_id="chunk-3",
+            content="return item",
+            symbol="process",
+            metadata={
+                "api_name": "Item",
+                "symbol_type": "class",
+            },
+        ),
+    ]
+
+    state = indexer.build(chunks)
+
+    scores = state["bm25"].get_scores(
+        indexer._tokenize("HtmlResponse")
+    )
+
+    assert len(scores) == 3
+    assert scores[0] > scores[1]
+    assert scores[0] > scores[2]
+
+
+def test_build_rejects_empty_chunks() -> None:
+    indexer = Indexing()
+
+    try:
+        indexer.build([])
+    except ValueError as exc:
+        assert str(exc) == "Cannot build indexes from empty chunks."
+    else:
+        raise AssertionError(
+            "Expected ValueError for empty chunks."
+        )

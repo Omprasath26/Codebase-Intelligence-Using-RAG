@@ -15,6 +15,7 @@ from sentence_transformers import SentenceTransformer
 from src.code_processing import KnowledgeChunk
 from src.utils.logger import get_logger
 
+
 logger = get_logger(__name__)
 
 
@@ -76,6 +77,11 @@ class Indexing:
             for position, chunk in enumerate(ordered_chunks)
         }
 
+        chunk_id_by_position = {
+            position: chunk.stable_id
+            for position, chunk in enumerate(ordered_chunks)
+        }
+
         metadata = IndexMetadata(
             index_version=self.index_version,
             embedding_model=self.embedding_model_name,
@@ -96,6 +102,7 @@ class Indexing:
             "embeddings": embeddings,
             "chunks": ordered_chunks,
             "chunk_metadata": chunk_metadata,
+            "chunk_id_by_position": chunk_id_by_position,
             "metadata": metadata,
         }
 
@@ -158,12 +165,54 @@ class Indexing:
             chunk.language or "",
         ]
 
+        enriched_metadata = self._metadata_search_text(
+            chunk.metadata
+        )
+
         return "\n".join(
             [
                 *searchable_metadata,
+                enriched_metadata,
                 chunk.content,
             ]
         )
+
+    def _metadata_search_text(
+        self,
+        metadata: dict[str, Any],
+    ) -> str:
+        """Convert enriched metadata into deterministic searchable text."""
+
+        values: list[str] = []
+
+        for key in sorted(metadata):
+            value = metadata[key]
+
+            if value is None:
+                continue
+
+            if isinstance(value, (str, int, float, bool)):
+                values.append(str(value))
+                continue
+
+            if isinstance(value, (list, tuple, set)):
+                normalized_values = sorted(
+                    str(item)
+                    for item in value
+                    if item is not None
+                )
+                values.extend(normalized_values)
+                continue
+
+            if isinstance(value, dict):
+                nested_values = self._metadata_search_text(value)
+                if nested_values:
+                    values.append(nested_values)
+                continue
+
+            values.append(str(value))
+
+        return "\n".join(values)
 
     def _tokenize(
         self,
@@ -199,6 +248,7 @@ class Indexing:
             "module": chunk.module,
             "symbol": chunk.symbol,
             "parent_symbol": chunk.parent_symbol,
+            "metadata": dict(chunk.metadata),
         }
 
     def build_id(

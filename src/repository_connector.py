@@ -10,7 +10,12 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config.settings import Settings
 from src.utils.logger import get_logger
@@ -84,7 +89,9 @@ class GitHubAPIClient:
             message = "GitHub rate limit reached."
 
             if retry_after:
-                message += f" Retry-After: {retry_after} seconds."
+                message += (
+                    f" Retry-After: {retry_after} seconds."
+                )
 
             raise GitHubRateLimitError(
                 message,
@@ -135,7 +142,7 @@ class RepositoryConnector:
         r"(?P<repo>[^/#]+?)(?:\.git)?/?$"
     )
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self,settings: Settings) -> None:
         self.settings = settings
 
         self.client = GitHubAPIClient(
@@ -150,7 +157,9 @@ class RepositoryConnector:
         )
 
         if not match:
-            raise ValueError("Invalid GitHub repository URL.")
+            raise ValueError(
+                "Invalid GitHub repository URL."
+            )
 
         reference = RepositoryReference(
             owner=match.group("owner"),
@@ -159,7 +168,9 @@ class RepositoryConnector:
         )
 
         if not reference.ref:
-            raise ValueError("Repository ref cannot be empty.")
+            raise ValueError(
+                "Repository ref cannot be empty."
+            )
 
         self.client.get(
             f"/repos/{reference.owner}/{reference.name}/commits/"
@@ -226,9 +237,29 @@ class RepositoryConnector:
         encoding = response.get("encoding")
 
         if encoding == "base64":
-            decoded_content = base64.b64decode(
-                content.replace("\n", "")
-            ).decode("utf-8")
+            try:
+                decoded_content = base64.b64decode(
+                    content.replace("\n", "")
+                ).decode("utf-8")
+            except UnicodeDecodeError:
+                logger.warning(
+                    "Unsupported or malformed encoding for "
+                    "repository file: %s",
+                    path,
+                )
+
+                return {
+                    "path": response.get("path", path),
+                    "sha": response.get("sha"),
+                    "size": response.get("size"),
+                    "content": None,
+                    "source_url": response.get("html_url"),
+                    "commit_sha": commit_sha,
+                    "status": "failed",
+                    "failure_reason": (
+                        "unsupported_or_invalid_encoding"
+                    ),
+                }
         else:
             decoded_content = content
 

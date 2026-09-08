@@ -57,20 +57,13 @@ class IngestionManifest(BaseModel):
     )
     checkpoint: IngestionCheckpoint | None = None
 
-    def add_artifact(
-        self,
-        artifact: ManifestArtifact,
-    ) -> None:
+    def add_artifact(self,artifact: ManifestArtifact) -> None:
         """Add one artifact record to the manifest."""
 
         self.artifacts.append(artifact)
         self.updated_at = datetime.now(timezone.utc)
 
-    def update_checkpoint(
-        self,
-        last_processed_index: int,
-        status: str = "in_progress",
-    ) -> None:
+    def update_checkpoint(self,last_processed_index: int,status: str = "in_progress") -> None:
         """Update the resumable ingestion checkpoint."""
 
         if self.checkpoint is None:
@@ -90,6 +83,24 @@ class IngestionManifest(BaseModel):
         )
         self.updated_at = datetime.now(timezone.utc)
 
+    def record_artifact(self,artifact: ManifestArtifact,processed_index: int) -> None:
+        """Record an artifact and advance the ingestion checkpoint."""
+
+        self.add_artifact(artifact)
+
+        self.update_checkpoint(
+            last_processed_index=processed_index,
+            status="in_progress",
+        )
+
+    def resume_from_index(self) -> int:
+        """Return the next artifact index to process after a checkpoint."""
+
+        if self.checkpoint is None:
+            return 0
+
+        return self.checkpoint.last_processed_index + 1
+
     def mark_completed(self) -> None:
         """Mark the ingestion run as successfully completed."""
 
@@ -100,10 +111,7 @@ class IngestionManifest(BaseModel):
             status="completed",
         )
 
-    def mark_failed(
-        self,
-        reason: str,
-    ) -> None:
+    def mark_failed(self,reason: str) -> None:
         """Mark the ingestion run as failed."""
 
         self.status = "failed"
@@ -128,10 +136,7 @@ class IngestionManifest(BaseModel):
             )
         )
 
-    def save(
-        self,
-        path: str | Path,
-    ) -> None:
+    def save(self,path: str | Path) -> None:
         """Persist the manifest as machine-readable JSON."""
 
         output_path = Path(path)
@@ -147,10 +152,7 @@ class IngestionManifest(BaseModel):
         )
 
     @classmethod
-    def load(
-        cls,
-        path: str | Path,
-    ) -> "IngestionManifest":
+    def load(cls,path: str | Path) -> "IngestionManifest":
         """Load a previously persisted manifest."""
 
         input_path = Path(path)

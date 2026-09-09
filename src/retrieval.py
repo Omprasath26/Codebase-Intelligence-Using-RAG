@@ -29,14 +29,7 @@ class RetrievedEvidence:
 class Retrieval:
     """Retrieve knowledge chunks using dense, lexical, and optional reranked search."""
 
-    def __init__(
-        self,
-        index_state: dict[str, Any],
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        rrf_k: int = 60,
-        reranker_model: str | None = None,
-        reranker: Any | None = None,
-    ) -> None:
+    def __init__(self,index_state: dict[str, Any],embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",rrf_k: int = 60,reranker_model: str | None = None,reranker: Any | None = None) -> None:
         """Initialize retrieval from an existing indexing state."""
 
         if not index_state:
@@ -93,15 +86,7 @@ class Retrieval:
 
         self._validate_metadata_positions()
 
-    def retrieve(
-        self,
-        query_analysis: QueryAnalysis,
-        top_k: int = 5,
-        candidate_k: int | None = None,
-        metadata_filters: dict[str, Any] | None = None,
-        rerank: bool = True,
-        rerank_k: int | None = None,
-    ) -> list[RetrievedEvidence]:
+    def retrieve( self,query_analysis: QueryAnalysis,top_k: int = 5,candidate_k: int | None = None,metadata_filters: dict[str, Any] | None = None,rerank: bool = True,rerank_k: int | None = None) -> list[RetrievedEvidence]:
         """
         Retrieve evidence using dense + BM25 RRF fusion and optional reranking.
 
@@ -168,11 +153,7 @@ class Retrieval:
 
         return filtered_results[:top_k]
 
-    def _dense_search(
-        self,
-        query: str,
-        candidate_k: int,
-    ) -> list[tuple[int, float]]:
+    def _dense_search(self,query: str,candidate_k: int) -> list[tuple[int, float]]:
         """Search the FAISS index using a normalized query embedding."""
 
         query_embedding = self.embedding_model.encode(
@@ -210,11 +191,7 @@ class Retrieval:
 
         return results
 
-    def _bm25_search(
-        self,
-        query: str,
-        candidate_k: int,
-    ) -> list[tuple[int, float]]:
+    def _bm25_search(self,query: str,candidate_k: int) -> list[tuple[int, float]]:
         """Search the BM25 index using the indexing-stage tokenization."""
 
         tokens = self._tokenize(query)
@@ -240,11 +217,7 @@ class Retrieval:
             for index in ranked_indices[:candidate_k]
         ]
 
-    def _fuse_results(
-        self,
-        dense_results: list[tuple[int, float]],
-        lexical_results: list[tuple[int, float]],
-    ) -> list[RetrievedEvidence]:
+    def _fuse_results(self,dense_results: list[tuple[int, float]],lexical_results: list[tuple[int, float]]) -> list[RetrievedEvidence]:
         """
         Fuse dense and lexical rankings using Reciprocal Rank Fusion.
 
@@ -308,12 +281,7 @@ class Retrieval:
 
         return results
 
-    def _rerank_results(
-        self,
-        query: str,
-        results: list[RetrievedEvidence],
-        rerank_k: int | None = None,
-    ) -> list[RetrievedEvidence]:
+    def _rerank_results(self, query: str,results: list[RetrievedEvidence],rerank_k: int | None = None) -> list[RetrievedEvidence]:
         """
         Rerank the merged candidate set with an optional CrossEncoder.
 
@@ -383,11 +351,7 @@ class Retrieval:
 
         return reranked + remaining_results
 
-    def _apply_metadata_filters(
-        self,
-        results: list[RetrievedEvidence],
-        metadata_filters: dict[str, Any] | None,
-    ) -> list[RetrievedEvidence]:
+    def _apply_metadata_filters(self,results: list[RetrievedEvidence],metadata_filters: dict[str, Any] | None) -> list[RetrievedEvidence]:
         """Apply exact metadata filters to retrieved evidence."""
 
         if not metadata_filters:
@@ -411,11 +375,7 @@ class Retrieval:
 
         return filtered
 
-    def _matches_filters(
-        self,
-        metadata: dict[str, Any],
-        metadata_filters: dict[str, Any],
-    ) -> bool:
+    def _matches_filters(self,metadata: dict[str, Any],metadata_filters: dict[str, Any]) -> bool:
         """Determine whether metadata satisfies all requested filters."""
 
         for key, expected in metadata_filters.items():
@@ -430,10 +390,7 @@ class Retrieval:
 
         return True
 
-    def _chunk_index(
-        self,
-        chunk: KnowledgeChunk,
-    ) -> int:
+    def _chunk_index(self,chunk: KnowledgeChunk) -> int:
         """Return the indexed position for a knowledge chunk."""
 
         for index, candidate in enumerate(self.chunks):
@@ -462,10 +419,7 @@ class Retrieval:
                 )
             )
 
-    def _tokenize(
-        self,
-        text: str,
-    ) -> list[str]:
+    def _tokenize(self,text: str) -> list[str]:
         """Tokenize query text consistently with the indexing stage."""
 
         import re

@@ -16,13 +16,7 @@ from src.retrieval import Retrieval
 class DeterministicEmbeddingModel:
     """Small deterministic embedding model for integration tests."""
 
-    def encode(
-        self,
-        texts: list[str],
-        convert_to_numpy: bool = True,
-        normalize_embeddings: bool = True,
-        show_progress_bar: bool = False,
-    ) -> np.ndarray:
+    def encode(self,texts: list[str],convert_to_numpy: bool = True,normalize_embeddings: bool = True,show_progress_bar: bool = False,) -> np.ndarray:
         """Create deterministic vectors from repository concepts."""
         vectors = []
 
@@ -49,12 +43,7 @@ class DeterministicEmbeddingModel:
         return np.asarray(vectors, dtype=np.float32)
 
 
-def make_artifact(
-    *,
-    stable_id: str,
-    path: str,
-    content: str,
-) -> RepositoryArtifact:
+def make_artifact(*,stable_id: str,path: str,content: str) -> RepositoryArtifact:
     """Create a repository artifact for integration testing."""
     return RepositoryArtifact(
         stable_id=stable_id,
@@ -132,9 +121,7 @@ def build_chunks() -> list[KnowledgeChunk]:
     return chunks
 
 
-def build_index(
-    chunks: list[KnowledgeChunk],
-) -> dict:
+def build_index(chunks: list[KnowledgeChunk]) -> dict:
     """Build the real indexing stage."""
     with patch(
         "src.indexing.SentenceTransformer",
@@ -148,9 +135,7 @@ def build_index(
         return indexer.build(chunks)
 
 
-def create_retrieval(
-    index_state: dict,
-) -> Retrieval:
+def create_retrieval(index_state: dict) -> Retrieval:
     """Create the real hybrid retrieval stage."""
     with patch(
         "src.retrieval.SentenceTransformer",
@@ -162,11 +147,7 @@ def create_retrieval(
         )
 
 
-def create_evaluation_query(
-    query_id: str,
-    query: str,
-    relevant_chunk_ids: list[str],
-) -> EvaluationQuery:
+def create_evaluation_query(query_id: str,query: str,relevant_chunk_ids: list[str]) -> EvaluationQuery:
     """Create an evaluation query using the actual evaluation contract."""
     return EvaluationQuery(
         query_id=query_id,

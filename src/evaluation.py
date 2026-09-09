@@ -45,19 +45,16 @@ class EvaluationSummary:
 class RetrievalEvaluation:
     """Evaluate retrieval results against deterministic ground truth."""
 
-    def __init__(
-        self,
-        dataset_path: str | Path | None = None,
-    ) -> None:
+    def __init__(self,dataset_path: str | Path | None = None) -> None:
         self.dataset_path = (
             Path(dataset_path)
             if dataset_path is not None
             else Path("data/evaluation/evaluation_dataset.json")
         )
 
-    # ------------------------------------------------------------------
+    
     # Ground-truth loading
-    # ------------------------------------------------------------------
+    
 
     def load_ground_truth(self) -> list[EvaluationQuery]:
         """Load and validate the retrieval ground-truth dataset."""
@@ -162,14 +159,12 @@ class RetrievalEvaluation:
 
         return evaluation_queries
 
-    # ------------------------------------------------------------------
+    
     # Result normalization
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def _extract_chunk_ids(
-        results: Iterable[RetrievedEvidence],
-    ) -> tuple[str, ...]:
+    def _extract_chunk_ids(results: Iterable[RetrievedEvidence]) -> tuple[str, ...]:
         """Extract stable chunk IDs in retrieval ranking order."""
 
         chunk_ids: list[str] = []
@@ -191,16 +186,12 @@ class RetrievalEvaluation:
 
         return tuple(chunk_ids)
 
-    # ------------------------------------------------------------------
+    
     # Recall
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def recall_at_k(
-        retrieved_chunk_ids: Iterable[str],
-        relevant_chunk_ids: Iterable[str],
-        k: int,
-    ) -> float:
+    def recall_at_k(retrieved_chunk_ids: Iterable[str],relevant_chunk_ids: Iterable[str],k: int,) -> float:
         """Calculate Recall@K."""
 
         if k <= 0:
@@ -219,16 +210,12 @@ class RetrievalEvaluation:
             retrieved.intersection(relevant)
         ) / len(relevant)
 
-    # ------------------------------------------------------------------
+    
     # Precision
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def precision_at_k(
-        retrieved_chunk_ids: Iterable[str],
-        relevant_chunk_ids: Iterable[str],
-        k: int,
-    ) -> float:
+    def precision_at_k(retrieved_chunk_ids: Iterable[str],relevant_chunk_ids: Iterable[str],k: int,) -> float:
         """Calculate Precision@K."""
 
         if k <= 0:
@@ -247,15 +234,12 @@ class RetrievalEvaluation:
 
         return relevant_count / len(retrieved)
 
-    # ------------------------------------------------------------------
+    
     # Mean Reciprocal Rank
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def reciprocal_rank(
-        retrieved_chunk_ids: Iterable[str],
-        relevant_chunk_ids: Iterable[str],
-    ) -> float:
+    def reciprocal_rank(retrieved_chunk_ids: Iterable[str],relevant_chunk_ids: Iterable[str]) -> float:
         """Calculate Reciprocal Rank of the first relevant result."""
 
         relevant = set(relevant_chunk_ids)
@@ -272,16 +256,11 @@ class RetrievalEvaluation:
 
         return 0.0
 
-    # ------------------------------------------------------------------
+    
     # One-query evaluation
-    # ------------------------------------------------------------------
+    
 
-    def evaluate_query(
-        self,
-        evaluation_query: EvaluationQuery,
-        results: Iterable[RetrievedEvidence],
-        k_values: Iterable[int] = (1, 3, 5, 10),
-    ) -> QueryEvaluation:
+    def evaluate_query(self,evaluation_query: EvaluationQuery,results: Iterable[RetrievedEvidence],k_values: Iterable[int] = (1, 3, 5, 10)) -> QueryEvaluation:
         """Evaluate one retrieval query."""
 
         k_values = tuple(k_values)
@@ -333,15 +312,12 @@ class RetrievalEvaluation:
             reciprocal_rank=reciprocal_rank,
         )
 
-    # ------------------------------------------------------------------
+    
     # Aggregate evaluation
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def summarize(
-        evaluations: Iterable[QueryEvaluation],
-        k_values: Iterable[int] = (1, 3, 5, 10),
-    ) -> EvaluationSummary:
+    def summarize(evaluations: Iterable[QueryEvaluation],k_values: Iterable[int] = (1, 3, 5, 10)) -> EvaluationSummary:
         """Aggregate per-query retrieval metrics."""
 
         evaluations = list(evaluations)
@@ -387,14 +363,11 @@ class RetrievalEvaluation:
             mean_reciprocal_rank=mean_reciprocal_rank,
         )
 
-    # ------------------------------------------------------------------
     # Evaluation result serialization
-    # ------------------------------------------------------------------
+    
 
     @staticmethod
-    def to_dict(
-        summary: EvaluationSummary,
-    ) -> dict[str, Any]:
+    def to_dict(summary: EvaluationSummary) -> dict[str, Any]:
         """Convert an evaluation summary to JSON-compatible data."""
 
         return {

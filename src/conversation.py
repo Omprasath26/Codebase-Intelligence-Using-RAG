@@ -1,11 +1,8 @@
 """Conversation state management for developer question answering."""
 
 from __future__ import annotations
-
 from uuid import uuid4
-
 from pydantic import BaseModel, ConfigDict, Field
-
 from src.context_assembly import EvidencePackage
 from src.generation import RAGResponse
 from src.query_analysis import QueryAnalysis
@@ -64,30 +61,19 @@ class ConversationState(BaseModel):
 
         return self.last_turn.response
 
-    def add_turn(
-        self,
-        query: str,
-        analysis: QueryAnalysis,
-        response: RAGResponse | None = None,
-    ) -> "ConversationState":
+    def add_turn(self, query: str,analysis: QueryAnalysis,response: RAGResponse | None = None) -> "ConversationState":
         """Return a new state containing the supplied conversation turn."""
         if not isinstance(query, str) or not query.strip():
             raise ValueError(
                 "query must be a non-empty string."
             )
 
-        if not isinstance(
-            analysis,
-            QueryAnalysis,
-        ):
+        if not isinstance(analysis,QueryAnalysis):
             raise TypeError(
                 "analysis must be a QueryAnalysis."
             )
 
-        if response is not None and not isinstance(
-            response,
-            RAGResponse,
-        ):
+        if response is not None and not isinstance(response,RAGResponse):
             raise TypeError(
                 "response must be a RAGResponse or None."
             )
@@ -113,15 +99,9 @@ class ConversationState(BaseModel):
             }
         )
 
-    def update_response(
-        self,
-        response: RAGResponse,
-    ) -> "ConversationState":
+    def update_response(self,response: RAGResponse) -> "ConversationState":
         """Return a new state with the latest turn response updated."""
-        if not isinstance(
-            response,
-            RAGResponse,
-        ):
+        if not isinstance(response,RAGResponse):
             raise TypeError(
                 "response must be a RAGResponse."
             )
@@ -146,20 +126,14 @@ class ConversationState(BaseModel):
             }
         )
 
-    def update_evidence(
-        self,
-        evidence_package: EvidencePackage,
-    ) -> "ConversationState":
+    def update_evidence(self,evidence_package: EvidencePackage) -> "ConversationState":
         """Return a new state using the newest retrieved evidence.
 
         New repository evidence replaces older evidence rather than
         being merged into it. This prevents stale repository evidence
         from remaining authoritative after a newer retrieval result.
         """
-        if not isinstance(
-            evidence_package,
-            EvidencePackage,
-        ):
+        if not isinstance(evidence_package,EvidencePackage):
             raise TypeError(
                 "evidence_package must be an EvidencePackage."
             )
@@ -210,11 +184,7 @@ class ConversationState(BaseModel):
             ref=None,
         )
 
-    def with_repository_scope(
-        self,
-        repository: str,
-        ref: str | None = None,
-    ) -> "ConversationState":
+    def with_repository_scope(self,repository: str,ref: str | None = None) -> "ConversationState":
         """Return a state explicitly scoped to a repository and ref."""
         if not isinstance(
             repository,
@@ -232,9 +202,7 @@ class ConversationState(BaseModel):
         )
 
     @staticmethod
-    def _repository_from_analysis(
-        analysis: QueryAnalysis,
-    ) -> str | None:
+    def _repository_from_analysis(analysis: QueryAnalysis) -> str | None:
         """Extract repository scope when represented by the analysis.
 
         QueryAnalysis currently does not have a dedicated repository
@@ -244,9 +212,7 @@ class ConversationState(BaseModel):
         return None
 
     @staticmethod
-    def _repository_from_evidence(
-        evidence_package: EvidencePackage,
-    ) -> str | None:
+    def _repository_from_evidence(evidence_package: EvidencePackage) -> str | None:
         """Extract repository scope from retrieved evidence."""
         for block in evidence_package.context_blocks:
             return block.chunk.repository

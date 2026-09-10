@@ -1,20 +1,12 @@
 """Tests for conversation state management."""
 
-from src.context_assembly import (
-    ContextBlock,
-    EvidencePackage,
-)
-from src.conversation import (
-    ConversationState,
-    ConversationTurn,
-)
+from src.context_assembly import (ContextBlock,EvidencePackage)
+from src.conversation import (ConversationState,ConversationTurn)
 from src.generation import RAGResponse
 from src.query_analysis import QueryAnalysis
 
 
-def make_analysis(
-    query: str = "Where is the Request class implemented?",
-) -> QueryAnalysis:
+def make_analysis(query: str = "Where is the Request class implemented?") -> QueryAnalysis:
     """Create a deterministic query analysis for testing."""
     return QueryAnalysis(
         original_query=query,
@@ -28,9 +20,7 @@ def make_analysis(
     )
 
 
-def make_response(
-    answer: str = "The Request class is implemented in the request module.",
-) -> RAGResponse:
+def make_response(answer: str = "The Request class is implemented in the request module.",) -> RAGResponse:
     """Create a deterministic RAG response for testing."""
     return RAGResponse(
         answer=answer,
@@ -43,10 +33,7 @@ def make_response(
     )
 
 
-def make_evidence(
-    repository: str = "scrapy/scrapy",
-    commit_sha: str = "abc123",
-) -> EvidencePackage:
+def make_evidence(repository: str = "scrapy/scrapy",commit_sha: str = "abc123") -> EvidencePackage:
     """Create a minimal evidence package."""
     from src.code_processing import KnowledgeChunk
 

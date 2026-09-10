@@ -4,7 +4,19 @@ from src.query_analysis import QueryAnalysis
 from src.retrieval import RetrievedEvidence
 
 
-def make_chunk(stable_id: str,artifact_id: str = "artifact-1",artifact_type: str = "code",content: str = "content",source_path: str = "scrapy/http/request.py",commit_sha: str = "abc123",symbol: str | None = None,parent_symbol: str | None = None,start_line: int | None = 1,end_line: int | None = 3,metadata: dict | None = None) -> KnowledgeChunk:
+def make_chunk(
+    stable_id: str,
+    artifact_id: str = "artifact-1",
+    artifact_type: str = "code",
+    content: str = "content",
+    source_path: str = "scrapy/http/request.py",
+    commit_sha: str = "abc123",
+    symbol: str | None = None,
+    parent_symbol: str | None = None,
+    start_line: int | None = 1,
+    end_line: int | None = 3,
+    metadata: dict | None = None
+) -> KnowledgeChunk:
     """Create a KnowledgeChunk for context-assembly tests."""
 
     return KnowledgeChunk(
@@ -436,8 +448,7 @@ def test_path_query_requires_matching_path() -> None:
 
     package = ContextAssembly(
         chunks=[chunk],
-        neighbor_limit=0,
-    ).assemble(
+        neighbor_limit=0).assemble(
         query="What is implemented in scrapy/http/request.py?",
         evidence=[make_evidence(chunk)],
         query_analysis=make_query_analysis(
@@ -569,3 +580,160 @@ def test_invalid_configuration_is_rejected() -> None:
         raise AssertionError(
             "Expected ValueError."
         )
+
+
+
+# Task 27 — Evidence Sufficiency, Confidence & Limitations
+
+
+def test_confidence_is_zero_when_evidence_is_missing() -> None:
+    """Missing evidence must have zero confidence."""
+
+    package = ContextAssembly(
+        chunks=[],
+    ).assemble(
+        query="Explain the code.",
+        evidence=[],
+    )
+
+    assert package.sufficient is False
+    assert package.confidence == 0.0
+    assert package.refinement_required is False
+
+
+def test_sufficient_exact_symbol_has_high_confidence() -> None:
+    """Direct symbol evidence should produce strong confidence."""
+
+    chunk = make_chunk(
+        stable_id="chunk-1",
+        content="class Request: pass",
+        symbol="Request",
+    )
+
+    package = ContextAssembly(
+        chunks=[chunk],
+        neighbor_limit=0,
+    ).assemble(
+        query="Explain Request.",
+        evidence=[make_evidence(chunk)],
+        query_analysis=make_query_analysis(
+            "Explain Request.",
+            intent="exact_symbol",
+            symbols=["Request"],
+        ),
+    )
+
+    assert package.sufficient is True
+    assert package.confidence == 0.75
+    assert package.refinement_required is False
+
+
+def test_sufficient_path_evidence_increases_confidence() -> None:
+    """Evidence from the requested path should strengthen confidence."""
+
+    chunk = make_chunk(
+        stable_id="chunk-1",
+        content="class Request: pass",
+        source_path="scrapy/http/request.py",
+    )
+
+    package = ContextAssembly(
+        chunks=[chunk],
+        neighbor_limit=0,
+    ).assemble(
+        query="What is implemented in scrapy/http/request.py?",
+        evidence=[make_evidence(chunk)],
+        query_analysis=make_query_analysis(
+            "What is implemented in scrapy/http/request.py?",
+            intent="path",
+            paths=["scrapy/http/request.py"],
+        ),
+    )
+
+    assert package.sufficient is True
+    assert package.confidence == 0.65
+    assert package.refinement_required is False
+
+
+def test_insufficient_symbol_evidence_requires_refinement() -> None:
+    """Missing requested symbol should trigger a refinement signal."""
+
+    chunk = make_chunk(
+        stable_id="chunk-1",
+        content="class Response: pass",
+        symbol="Response",
+    )
+
+    package = ContextAssembly(
+        chunks=[chunk],
+        neighbor_limit=0,
+    ).assemble(
+        query="Explain Request.",
+        evidence=[make_evidence(chunk)],
+        query_analysis=make_query_analysis(
+            "Explain Request.",
+            intent="exact_symbol",
+            symbols=["Request"],
+        ),
+    )
+
+    assert package.sufficient is False
+    assert package.confidence == 0.0
+    assert package.refinement_required is True
+    assert package.limitation is not None
+
+
+def test_mixed_revisions_require_refinement() -> None:
+    """Conflicting revisions must block generation and request refinement."""
+
+    first = make_chunk(
+        stable_id="chunk-1",
+        commit_sha="commit-a",
+    )
+
+    second = make_chunk(
+        stable_id="chunk-2",
+        commit_sha="commit-b",
+    )
+
+    package = ContextAssembly(
+        chunks=[first, second],
+        neighbor_limit=0,
+    ).assemble(
+        query="Explain the code.",
+        evidence=[
+            make_evidence(first),
+            make_evidence(second),
+        ],
+    )
+
+    assert package.sufficient is False
+    assert package.confidence == 0.0
+    assert package.refinement_required is True
+    assert package.repository_revision is None
+
+
+def test_historical_evidence_has_strong_confidence() -> None:
+    """Historical artifact evidence should satisfy historical questions."""
+
+    chunk = make_chunk(
+        stable_id="commit-1",
+        artifact_type="commit",
+        content="Introduced Request behavior.",
+    )
+
+    package = ContextAssembly(
+        chunks=[chunk],
+        neighbor_limit=0,
+    ).assemble(
+        query="When was this behavior introduced?",
+        evidence=[make_evidence(chunk)],
+        query_analysis=make_query_analysis(
+            "When was this behavior introduced?",
+            intent="historical",
+        ),
+    )
+
+    assert package.sufficient is True
+    assert package.confidence == 0.60
+    assert package.refinement_required is False

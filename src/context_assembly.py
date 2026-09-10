@@ -32,6 +32,8 @@ class EvidencePackage:
     limitation: str | None
     repository_revision: str | None
     total_characters: int
+    confidence: float = 0.0
+    refinement_required: bool = False
 
 
 class ContextAssembly:
@@ -64,8 +66,7 @@ class ContextAssembly:
         for chunk in self.chunks:
             self._chunks_by_artifact.setdefault(
                 chunk.artifact_id,
-                [],
-            ).append(chunk)
+                []).append(chunk)
 
         for artifact_chunks in self._chunks_by_artifact.values():
             artifact_chunks.sort(
@@ -80,7 +81,7 @@ class ContextAssembly:
                 )
             )
 
-    def assemble(self,query: str,evidence: list[RetrievedEvidence], query_analysis: Any | None = None) -> EvidencePackage:
+    def assemble(self,query: str,evidence: list[RetrievedEvidence],query_analysis: Any | None = None) -> EvidencePackage:
         """Build the final evidence package deterministically."""
 
         if not isinstance(query, str):
@@ -97,6 +98,8 @@ class ContextAssembly:
                 limitation="No repository evidence was retrieved.",
                 repository_revision=None,
                 total_characters=0,
+                confidence=0.0,
+                refinement_required=False,
             )
 
         expanded = self._expand_evidence(evidence)
@@ -116,6 +119,8 @@ class ContextAssembly:
                 limitation=revision_error,
                 repository_revision=None,
                 total_characters=self._total_characters(budgeted),
+                confidence=0.0,
+                refinement_required=True,
             )
 
         budgeted = self._apply_budget(deduplicated)
@@ -125,13 +130,29 @@ class ContextAssembly:
             context_blocks=budgeted,
         )
 
+        sufficient = limitation is None
+
+        confidence = self._assess_confidence(
+            query_analysis=query_analysis,
+            context_blocks=budgeted,
+            sufficient=sufficient,
+        )
+
+        refinement_required = self._requires_refinement(
+            query_analysis=query_analysis,
+            context_blocks=budgeted,
+            sufficient=sufficient,
+        )
+
         return EvidencePackage(
             query=query,
             context_blocks=budgeted,
-            sufficient=limitation is None,
+            sufficient=sufficient,
             limitation=limitation,
             repository_revision=revision,
             total_characters=self._total_characters(budgeted),
+            confidence=confidence,
+            refinement_required=refinement_required,
         )
 
     def _expand_evidence(self,evidence: list[RetrievedEvidence]) -> list[ContextBlock]:
@@ -231,7 +252,7 @@ class ContextAssembly:
             key=lambda candidate: candidate.stable_id,
         )[0]
 
-    def _find_neighbors( self, chunk: KnowledgeChunk) -> list[KnowledgeChunk]:
+    def _find_neighbors(self,chunk: KnowledgeChunk) -> list[KnowledgeChunk]:
         """Find nearby structural chunks from the same artifact."""
 
         if self.neighbor_limit == 0:
@@ -293,7 +314,7 @@ class ContextAssembly:
             key=lambda candidate: candidate.stable_id,
         )
 
-    def _extract_known_chunk_ids(self,value: Any) -> set[str]:
+    def _extract_known_chunk_ids( self,value: Any) -> set[str]:
         """Extract IDs only when metadata points to known chunks."""
 
         found: set[str] = set()
@@ -360,7 +381,7 @@ class ContextAssembly:
             block.chunk.stable_id,
         )
 
-    def _check_revision_consistency( self,blocks: list[ContextBlock]) -> tuple[str | None, str | None]:
+    def _check_revision_consistency(self,blocks: list[ContextBlock]) -> tuple[str | None, str | None]:
         """Reject context that silently mixes known repository revisions."""
 
         revisions = sorted(
@@ -501,7 +522,95 @@ class ContextAssembly:
 
         return None
 
-    def _total_characters( self,blocks: list[ContextBlock]) -> int:
+    def _assess_confidence(self,query_analysis: Any | None,context_blocks: list[ContextBlock],sufficient: bool) -> float:
+        """Calculate a deterministic confidence score for assembled evidence."""
+
+        if not context_blocks:
+            return 0.0
+
+        if not sufficient:
+            return 0.0
+
+        confidence = 0.50
+
+        if query_analysis is None:
+            return confidence
+
+        symbols = getattr(
+            query_analysis,
+            "symbols",
+            [],
+        )
+
+        paths = getattr(
+            query_analysis,
+            "paths",
+            [],
+        )
+
+        intent = getattr(
+            query_analysis,
+            "intent",
+            "",
+        )
+
+        if symbols:
+            symbol_matches = sum(
+                1
+                for block in context_blocks
+                if (
+                    block.chunk.symbol in symbols
+                    or block.chunk.parent_symbol in symbols
+                )
+            )
+
+            if symbol_matches:
+                confidence += 0.25
+
+        if paths:
+            path_matches = sum(
+                1
+                for block in context_blocks
+                if any(
+                    path in block.chunk.source_path_or_object_id
+                    for path in paths
+                )
+            )
+
+            if path_matches:
+                confidence += 0.15
+
+        if intent == "historical":
+            historical_types = {
+                "issue",
+                "pull_request",
+                "pr",
+                "commit",
+                "review",
+            }
+
+            if any(
+                block.chunk.artifact_type in historical_types
+                for block in context_blocks):
+                confidence += 0.10
+
+        return min(confidence, 1.0)
+
+    def _requires_refinement(self,query_analysis: Any | None,context_blocks: list[ContextBlock],sufficient: bool) -> bool:
+        """Determine whether additional retrieval/context work may be useful."""
+
+        if sufficient:
+            return False
+
+        if not context_blocks:
+            return False
+
+        if query_analysis is None:
+            return True
+
+        return True
+
+    def _total_characters(self,blocks: list[ContextBlock]) -> int:
         """Return total selected context characters."""
 
         return sum(

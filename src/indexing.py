@@ -33,12 +33,7 @@ class IndexMetadata:
 class Indexing:
     """Generate embeddings and build FAISS and BM25 indexes."""
 
-    def __init__(
-        self,
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        index_version: str = "v1",
-        chunking_version: str = "v1",
-    ) -> None:
+    def __init__(self,embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",index_version: str = "v1",chunking_version: str = "v1") -> None:
         self.embedding_model_name = embedding_model
         self.index_version = index_version
         self.chunking_version = chunking_version
@@ -112,13 +107,7 @@ class Indexing:
             },
         }
 
-    def prepare_incremental(
-        self,
-        previous_index_state: dict[str, Any],
-        chunks: list[KnowledgeChunk],
-        affected_chunk_ids: set[str],
-        removed_chunk_ids: set[str] | None = None,
-    ) -> dict[str, Any]:
+    def prepare_incremental(self, previous_index_state: dict[str, Any],chunks: list[KnowledgeChunk],affected_chunk_ids: set[str],removed_chunk_ids: set[str] | None = None) -> dict[str, Any]:
         """Prepare a replacement index state for an incremental update."""
         if not previous_index_state:
             raise ValueError("previous_index_state cannot be empty.")
@@ -405,5 +394,4 @@ class Indexing:
         )
 
         return hashlib.sha256(
-            identity.encode("utf-8")
-        ).hexdigest()
+            identity.encode("utf-8")).hexdigest()

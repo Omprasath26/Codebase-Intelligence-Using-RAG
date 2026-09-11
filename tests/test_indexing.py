@@ -1,16 +1,10 @@
 import numpy as np
 import pytest
-
 from src.code_processing import KnowledgeChunk
 from src.indexing import Indexing
 
 
-def make_chunk(
-    stable_id: str,
-    content: str,
-    symbol: str | None = None,
-    metadata: dict | None = None,
-) -> KnowledgeChunk:
+def make_chunk(stable_id: str,content: str,symbol: str | None = None,metadata: dict | None = None) -> KnowledgeChunk:
     return KnowledgeChunk(
         stable_id=stable_id,
         artifact_id="artifact-123",

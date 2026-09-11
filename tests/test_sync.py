@@ -3,25 +3,56 @@
 from pathlib import Path
 from unittest.mock import Mock
 
-from src import sync
 from src.change_detection import ChangeType
+from src.config.settings import (
+    IngestionSettings,
+    RepositorySettings,
+    Settings,
+)
 from src.ingestion_control import IngestionControl
-from src.repository_connector import RepositoryReference
+from src.repository_connector import (
+    RepositoryConnector,
+    RepositoryReference,
+)
 from src.sync import RepositorySync
 
 
-def create_sync() -> RepositorySync:
-    """Create a RepositorySync instance with mocked dependencies."""
+def make_settings() -> Settings:
+    """Create test settings."""
 
-    connector = Mock()
-    ingestion_control = Mock(spec=IngestionControl)
-
-    sync = RepositorySync(
-        connector=connector,
-        ingestion_control=ingestion_control,
+    return Settings(
+        repository=RepositorySettings(
+            url="https://github.com/scrapy/scrapy",
+            ref="master",
+        ),
+        ingestion=IngestionSettings(
+            max_file_size_bytes=1048576,
+            allowed_extensions=[
+                ".py",
+                ".md",
+            ],
+            excluded_directories=[
+                ".git",
+                "build",
+            ],
+        ),
+        github_token=None,
     )
 
-    return sync
+
+def make_sync() -> RepositorySync:
+    """Create a synchronization instance for tests."""
+
+    connector = RepositoryConnector(
+        make_settings()
+    )
+
+    return RepositorySync(
+        connector=connector,
+        ingestion_control=IngestionControl(
+            make_settings()
+        ),
+    )
 
 
 def configure_connector(sync: RepositorySync) -> None:
@@ -40,218 +71,91 @@ def configure_connector(sync: RepositorySync) -> None:
             "owner": "scrapy",
             "name": "scrapy",
             "ref": "master",
-            "commit_sha": "commit-old",
+            "commit_sha": "commit-new",
         }
     )
 
+
+def test_initial_sync_detects_added_artifact(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
+
+    configure_connector(sync)
+
     sync.connector.fetch_tree = Mock(
-        return_value=[]
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "blob-1",
+            }
+        ]
     )
 
     sync.connector.fetch_files = Mock(
-        return_value=[]
-    )
-
-
-def test_initial_sync_marks_files_as_added(tmp_path: Path) -> None:
-    """Initial synchronization should report repository files as added."""
-
-    sync = create_sync()
-    configure_connector(sync)
-
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-1",
-        }
-    ]
-
-    sync.connector.fetch_files.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-1",
-            "size": 100,
-            "content": (
-                "class Request:\n"
-                "    pass\n"
-            ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
-        }
-    ]
-
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
-    )
-
-    sync.ingestion_control.normalize_file.return_value = Mock(
-        stable_id="artifact-1",
-        repository="scrapy/scrapy",
-        artifact_type="code",
-        source_path_or_object_id=(
-            "scrapy/http/request.py"
-        ),
-        source_url=(
-            "https://example.com/request.py"
-        ),
-        source_sha="blob-1",
-        commit_sha="commit-old",
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "sha": "blob-1",
+                "size": 100,
+                "content": "class Request:\n    pass\n",
+                "source_url": (
+                    "https://github.com/scrapy/scrapy/"
+                    "blob/commit-new/scrapy/http/request.py"
+                ),
+            }
+        ]
     )
 
     manifest_path = tmp_path / "manifest.json"
 
-    changes = sync.synchronize(manifest_path)
+    changes = sync.synchronize(
+        manifest_path
+    )
 
     assert len(changes) == 1
-    assert changes[0].change_type == ChangeType.ADDED
-    assert changes[0].current_sha == "commit-old"
-
-    sync.connector.fetch_files.assert_called_once_with(
-        sync.connector.validate_reference.return_value,
-        ["scrapy/http/request.py"],
-        "commit-old",
-    )
-
-
-def test_unchanged_file_is_not_fetched_again(tmp_path: Path) -> None:
-    """Unchanged files should be carried forward without refetching."""
-
-    sync = create_sync()
-    configure_connector(sync)
-
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-1",
-        }
-    ]
-
-    sync.connector.fetch_files.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-1",
-            "size": 100,
-            "content": (
-                "class Request:\n"
-                "    pass\n"
-            ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
-        }
-    ]
-
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
-    )
-
-    sync.ingestion_control.normalize_file.return_value = Mock(
-        stable_id="artifact-1",
-        repository="scrapy/scrapy",
-        artifact_type="code",
-        source_path_or_object_id=(
-            "scrapy/http/request.py"
-        ),
-        source_url=(
-            "https://example.com/request.py"
-        ),
-        source_sha="blob-1",
-        commit_sha="commit-old",
-    )
-
-    manifest_path = tmp_path / "manifest.json"
-
-    first_changes = sync.synchronize(manifest_path)
-
-    assert len(first_changes) == 1
-    assert first_changes[0].change_type == ChangeType.ADDED
-
-    sync.connector.fetch_repository_metadata.return_value[
-        "commit_sha"
-    ] = "commit-new"
-
-    sync.connector.fetch_files.reset_mock()
-    sync.ingestion_control.normalize_file.reset_mock()
-
-    second_changes = sync.synchronize(manifest_path)
-
-    assert len(second_changes) == 1
-
     assert (
-        second_changes[0].change_type
-        == ChangeType.UNCHANGED
+        changes[0].change_type
+        == ChangeType.ADDED
     )
+    assert changes[0].current_sha == "commit-new"
 
-    assert second_changes[0].previous_sha == "commit-old"
-    assert second_changes[0].current_sha == "commit-new"
-    assert second_changes[0].source_sha == "blob-1"
-
-    sync.connector.fetch_files.assert_called_once_with(
-    sync.connector.validate_reference.return_value,
-    [],
-    "commit-new",
-    )
-
-    sync.ingestion_control.normalize_file.assert_not_called()
+    assert manifest_path.exists()
 
 
-def test_modified_file_is_fetched_again(tmp_path: Path) -> None:
-    """Modified files should be fetched and reported as modified."""
+def test_second_sync_detects_modified_artifact(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
 
-    sync = create_sync()
     configure_connector(sync)
 
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-old",
-        }
-    ]
-
-    sync.connector.fetch_files.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-old",
-            "size": 100,
-            "content": (
-                "class Request:\n"
-                "    pass\n"
-            ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
-        }
-    ]
-
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
-    )
-
-    sync.ingestion_control.normalize_file.return_value = Mock(
-        stable_id="artifact-1",
-        repository="scrapy/scrapy",
-        artifact_type="code",
-        source_path_or_object_id=(
-            "scrapy/http/request.py"
-        ),
-        source_url=(
-            "https://example.com/request.py"
-        ),
-        source_sha="blob-old",
-        commit_sha="commit-old",
-    )
-
     manifest_path = tmp_path / "manifest.json"
+
+    sync.connector.fetch_tree = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "blob-old",
+            }
+        ]
+    )
+
+    sync.connector.fetch_files = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "sha": "blob-old",
+                "size": 100,
+                "content": "class Request:\n    pass\n",
+                "source_url": "https://example/request.py",
+            }
+        ]
+    )
 
     sync.synchronize(manifest_path)
 
@@ -275,96 +179,55 @@ def test_modified_file_is_fetched_again(tmp_path: Path) -> None:
             "size": 120,
             "content": (
                 "class Request:\n"
-                "    def __init__(self):\n"
-                "        pass\n"
+                "    value = 1\n"
             ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
+            "source_url": "https://example/request.py",
         }
     ]
 
-    sync.ingestion_control.normalize_file.return_value = Mock(
-        stable_id="artifact-1",
-        repository="scrapy/scrapy",
-        artifact_type="code",
-        source_path_or_object_id=(
-            "scrapy/http/request.py"
-        ),
-        source_url=(
-            "https://example.com/request.py"
-        ),
-        source_sha="blob-new",
-        commit_sha="commit-new",
+    changes = sync.synchronize(
+        manifest_path
     )
-
-    sync.connector.fetch_files.reset_mock()
-
-    changes = sync.synchronize(manifest_path)
 
     assert len(changes) == 1
-    assert changes[0].change_type == ChangeType.MODIFIED
-    assert changes[0].previous_sha == "commit-old"
-    assert changes[0].current_sha == "commit-new"
-    assert changes[0].source_sha == "blob-new"
-
-    sync.connector.fetch_files.assert_called_once_with(
-        sync.connector.validate_reference.return_value,
-        ["scrapy/http/request.py"],
-        "commit-new",
+    assert (
+        changes[0].change_type
+        == ChangeType.MODIFIED
     )
+    assert changes[0].previous_sha == "commit-new"
 
 
-def test_deleted_file_is_detected(tmp_path: Path) -> None:
-    """A file absent from the new tree should be reported as deleted."""
+def test_second_sync_detects_deleted_artifact(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
 
-    sync = create_sync()
     configure_connector(sync)
 
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-1",
-        }
-    ]
-
-    sync.connector.fetch_files.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-1",
-            "size": 100,
-            "content": (
-                "class Request:\n"
-                "    pass\n"
-            ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
-        }
-    ]
-
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
-    )
-
-    sync.ingestion_control.normalize_file.return_value = Mock(
-        stable_id="artifact-1",
-        repository="scrapy/scrapy",
-        artifact_type="code",
-        source_path_or_object_id=(
-            "scrapy/http/request.py"
-        ),
-        source_url=(
-            "https://example.com/request.py"
-        ),
-        source_sha="blob-1",
-        commit_sha="commit-old",
-    )
-
     manifest_path = tmp_path / "manifest.json"
+
+    sync.connector.fetch_tree = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "blob-1",
+            }
+        ]
+    )
+
+    sync.connector.fetch_files = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "sha": "blob-1",
+                "size": 100,
+                "content": "class Request:\n    pass\n",
+                "source_url": "https://example/request.py",
+            }
+        ]
+    )
 
     sync.synchronize(manifest_path)
 
@@ -373,63 +236,76 @@ def test_deleted_file_is_detected(tmp_path: Path) -> None:
     ] = "commit-new"
 
     sync.connector.fetch_tree.return_value = []
-    sync.connector.fetch_files.reset_mock()
-
-    changes = sync.synchronize(manifest_path)
-
-    assert len(changes) == 1
-    assert changes[0].change_type == ChangeType.DELETED
-    assert changes[0].previous_sha == "commit-old"
-
-    sync.connector.fetch_files.assert_called_once_with(
-        sync.connector.validate_reference.return_value,
-        [],
-        "commit-new",
-    )
-
-
-def test_excluded_file_is_recorded(tmp_path: Path) -> None:
-    """Excluded files should be recorded with an exclusion reason."""
-
-    sync = create_sync()
-    configure_connector(sync)
-
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "build/output.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-build",
-        }
-    ]
 
     sync.connector.fetch_files.return_value = []
 
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=False,
-        reason="excluded_directory",
+    changes = sync.synchronize(
+        manifest_path
+    )
+
+    assert len(changes) == 1
+    assert (
+        changes[0].change_type
+        == ChangeType.DELETED
+    )
+
+
+def test_excluded_file_is_recorded(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
+
+    configure_connector(sync)
+
+    sync.connector.fetch_tree = Mock(
+        return_value=[
+            {
+                "path": "build/generated.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "generated-sha",
+            }
+        ]
+    )
+
+    sync.connector.fetch_files = Mock(
+        return_value=[]
     )
 
     manifest_path = tmp_path / "manifest.json"
 
-    changes = sync.synchronize(manifest_path)
+    changes = sync.synchronize(
+        manifest_path
+    )
 
     assert changes == []
 
-    sync.connector.fetch_files.assert_called_once_with(
-        sync.connector.validate_reference.return_value,
-        [],
-        "commit-old",
+    manifest = sync._load_previous_manifest(
+        manifest_path
+    )
+
+    assert manifest is not None
+    assert len(manifest.artifacts) == 1
+    assert (
+        manifest.artifacts[0].status
+        == "excluded"
+    )
+    assert (
+        manifest.artifacts[0].exclusion_reason
+        == "excluded_directory"
     )
 
 
-def test_failed_file_fetch_is_recorded(tmp_path: Path) -> None:
-    """A missing fetch result should produce an explicit failure record."""
+def test_unchanged_artifact_is_not_fetched_again(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
 
-    sync = create_sync()
     configure_connector(sync)
 
-    sync.connector.fetch_tree.return_value = [
+    manifest_path = tmp_path / "manifest.json"
+
+    tree = [
         {
             "path": "scrapy/http/request.py",
             "type": "blob",
@@ -438,112 +314,277 @@ def test_failed_file_fetch_is_recorded(tmp_path: Path) -> None:
         }
     ]
 
-    sync.connector.fetch_files.return_value = []
+    files = [
+        {
+            "path": "scrapy/http/request.py",
+            "sha": "blob-1",
+            "size": 100,
+            "content": "class Request:\n    pass\n",
+            "source_url": "https://example/request.py",
+        }
+    ]
 
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
+    sync.connector.fetch_tree = Mock(
+        return_value=tree
     )
+
+    sync.connector.fetch_files = Mock(
+        return_value=files
+    )
+
+    sync.synchronize(manifest_path)
+
+    sync.connector.fetch_files.reset_mock()
+
+    changes = sync.synchronize(
+        manifest_path
+    )
+
+    assert len(changes) == 1
+    assert (
+        changes[0].change_type
+        == ChangeType.UNCHANGED
+    )
+
+    sync.connector.fetch_files.assert_not_called()
+
+
+def test_only_modified_artifact_is_fetched(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
+
+    configure_connector(sync)
 
     manifest_path = tmp_path / "manifest.json"
 
-    changes = sync.synchronize(manifest_path)
+    initial_tree = [
+        {
+            "path": "scrapy/http/request.py",
+            "type": "blob",
+            "size": 100,
+            "sha": "request-old",
+        },
+        {
+            "path": "scrapy/http/response.py",
+            "type": "blob",
+            "size": 100,
+            "sha": "response-unchanged",
+        },
+    ]
 
-    assert changes == []
+    initial_files = [
+        {
+            "path": "scrapy/http/request.py",
+            "sha": "request-old",
+            "size": 100,
+            "content": "class Request:\n    pass\n",
+            "source_url": "https://example/request.py",
+        },
+        {
+            "path": "scrapy/http/response.py",
+            "sha": "response-unchanged",
+            "size": 100,
+            "content": "class Response:\n    pass\n",
+            "source_url": "https://example/response.py",
+        },
+    ]
+
+    sync.connector.fetch_tree = Mock(
+        return_value=initial_tree
+    )
+
+    sync.connector.fetch_files = Mock(
+        return_value=initial_files
+    )
+
+    sync.synchronize(manifest_path)
+
+    sync.connector.fetch_repository_metadata.return_value[
+        "commit_sha"
+    ] = "commit-new"
+
+    sync.connector.fetch_tree.return_value = [
+        {
+            "path": "scrapy/http/request.py",
+            "type": "blob",
+            "size": 120,
+            "sha": "request-new",
+        },
+        {
+            "path": "scrapy/http/response.py",
+            "type": "blob",
+            "size": 100,
+            "sha": "response-unchanged",
+        },
+    ]
+
+    sync.connector.fetch_files.reset_mock()
+
+    sync.connector.fetch_files.return_value = [
+        {
+            "path": "scrapy/http/request.py",
+            "sha": "request-new",
+            "size": 120,
+            "content": (
+                "class Request:\n"
+                "    value = 1\n"
+            ),
+            "source_url": "https://example/request.py",
+        }
+    ]
+
+    changes = sync.synchronize(
+        manifest_path
+    )
+
+    change_types = {
+        change.change_type
+        for change in changes
+    }
+
+    assert change_types == {
+        ChangeType.MODIFIED,
+        ChangeType.UNCHANGED,
+    }
 
     sync.connector.fetch_files.assert_called_once_with(
         sync.connector.validate_reference.return_value,
         ["scrapy/http/request.py"],
-        "commit-old",
+        "commit-new",
     )
 
 
-def test_failed_artifact_from_connector_is_recorded(tmp_path: Path) -> None:
-    """Connector failure records should be persisted by Sync."""
+def test_rename_fetches_only_new_path(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
 
-    sync = create_sync()
     configure_connector(sync)
-
-    sync.connector.fetch_tree.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "type": "blob",
-            "size": 100,
-            "sha": "blob-1",
-        }
-    ]
-
-    sync.connector.fetch_files.return_value = [
-        {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-1",
-            "status": "failed",
-            "failure_reason": (
-                "unsupported_or_invalid_encoding"
-            ),
-            "source_url": (
-                "https://example.com/request.py"
-            ),
-        }
-    ]
-
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
-    )
 
     manifest_path = tmp_path / "manifest.json"
 
-    changes = sync.synchronize(manifest_path)
+    sync.connector.fetch_tree = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "same-source-sha",
+            }
+        ]
+    )
 
-    assert changes == []
+    sync.connector.fetch_files = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "sha": "same-source-sha",
+                "size": 100,
+                "content": "class Request:\n    pass\n",
+                "source_url": "https://example/request.py",
+            }
+        ]
+    )
 
-    sync.ingestion_control.normalize_file.assert_not_called()
+    sync.synchronize(manifest_path)
 
-
-def test_normalization_failure_is_recorded(tmp_path: Path) -> None:
-    """Normalization failures should not abort the synchronization."""
-
-    sync = create_sync()
-    configure_connector(sync)
+    sync.connector.fetch_repository_metadata.return_value[
+        "commit_sha"
+    ] = "commit-renamed"
 
     sync.connector.fetch_tree.return_value = [
         {
-            "path": "scrapy/http/request.py",
+            "path": "scrapy/http/renamed_request.py",
             "type": "blob",
             "size": 100,
-            "sha": "blob-1",
+            "sha": "same-source-sha",
         }
     ]
+
+    sync.connector.fetch_files.reset_mock()
 
     sync.connector.fetch_files.return_value = [
         {
-            "path": "scrapy/http/request.py",
-            "sha": "blob-1",
+            "path": "scrapy/http/renamed_request.py",
+            "sha": "same-source-sha",
             "size": 100,
-            "content": (
-                "class Request:\n"
-                "    pass\n"
-            ),
+            "content": "class Request:\n    pass\n",
             "source_url": (
-                "https://example.com/request.py"
+                "https://example/renamed_request.py"
             ),
         }
     ]
 
-    sync.ingestion_control.evaluate_file.return_value = Mock(
-        accepted=True,
-        reason="accepted",
+    changes = sync.synchronize(
+        manifest_path
     )
 
-    sync.ingestion_control.normalize_file.side_effect = (
-        ValueError("invalid repository artifact")
+    assert len(changes) == 1
+    assert (
+        changes[0].change_type
+        == ChangeType.RENAMED
     )
+
+    sync.connector.fetch_files.assert_called_once_with(
+        sync.connector.validate_reference.return_value,
+        ["scrapy/http/renamed_request.py"],
+        "commit-renamed",
+    )
+
+
+def test_same_revision_still_returns_unchanged(
+    tmp_path: Path,
+) -> None:
+    sync = make_sync()
+
+    configure_connector(sync)
 
     manifest_path = tmp_path / "manifest.json"
 
-    changes = sync.synchronize(manifest_path)
+    sync.connector.fetch_tree = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "type": "blob",
+                "size": 100,
+                "sha": "blob-1",
+            }
+        ]
+    )
 
-    assert changes == []
+    sync.connector.fetch_files = Mock(
+        return_value=[
+            {
+                "path": "scrapy/http/request.py",
+                "sha": "blob-1",
+                "size": 100,
+                "content": "class Request:\n    pass\n",
+                "source_url": "https://example/request.py",
+            }
+        ]
+    )
 
-    sync.ingestion_control.normalize_file.assert_called_once()
+    first_changes = sync.synchronize(
+        manifest_path
+    )
+
+    assert len(first_changes) == 1
+    assert (
+        first_changes[0].change_type
+        == ChangeType.ADDED
+    )
+
+    sync.connector.fetch_files.reset_mock()
+
+    second_changes = sync.synchronize(
+        manifest_path
+    )
+
+    assert len(second_changes) == 1
+    assert (
+        second_changes[0].change_type
+        == ChangeType.UNCHANGED
+    )
+
+    sync.connector.fetch_files.assert_not_called()

@@ -37,8 +37,95 @@ class KnowledgeChunk(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class IncrementalProcessingResult(BaseModel):
+    """Result of incrementally processing affected repository artifacts."""
+
+    chunks: list[KnowledgeChunk]
+    affected_chunk_ids: list[str] = Field(default_factory=list)
+    removed_chunk_ids: list[str] = Field(default_factory=list)
+    preserved_chunk_ids: list[str] = Field(default_factory=list)
+
+
 class CodeProcessing:
     """Parse artifacts and produce enriched structural knowledge chunks."""
+
+    def process_incremental(
+        self,
+        artifacts: list[RepositoryArtifact],
+        previous_chunks: list[KnowledgeChunk],
+        affected_artifact_ids: set[str],
+        removed_artifact_ids: set[str] | None = None,
+    ) -> IncrementalProcessingResult:
+        """Reprocess affected artifacts while preserving unchanged chunks."""
+        if removed_artifact_ids is None:
+            removed_artifact_ids = set()
+
+        current_artifacts = {
+            artifact.stable_id: artifact
+            for artifact in artifacts
+        }
+
+        previous_by_artifact: dict[str, list[KnowledgeChunk]] = {}
+        for chunk in previous_chunks:
+            previous_by_artifact.setdefault(
+                chunk.artifact_id,
+                [],
+            ).append(chunk)
+
+        chunks: list[KnowledgeChunk] = []
+        affected_chunk_ids: set[str] = set()
+        removed_chunk_ids: set[str] = set()
+        preserved_chunk_ids: set[str] = set()
+
+        affected_ids = set(affected_artifact_ids)
+        removed_ids = set(removed_artifact_ids)
+
+        for artifact_id, old_chunks in previous_by_artifact.items():
+            if artifact_id in affected_ids or artifact_id in removed_ids:
+                removed_chunk_ids.update(
+                    chunk.stable_id
+                    for chunk in old_chunks
+                )
+                continue
+
+            chunks.extend(old_chunks)
+            preserved_chunk_ids.update(
+                chunk.stable_id
+                for chunk in old_chunks
+            )
+
+        for artifact_id in sorted(affected_ids):
+            artifact = current_artifacts.get(artifact_id)
+            if artifact is None:
+                # Affected artifacts that are absent from the current set
+                # are treated as removed rather than silently preserved.
+                removed_chunk_ids.update(
+                    chunk.stable_id
+                    for chunk in previous_by_artifact.get(
+                        artifact_id,
+                        [],
+                    )
+                )
+                continue
+
+            new_chunks = self.process(artifact)
+            chunks.extend(new_chunks)
+            affected_chunk_ids.update(
+                chunk.stable_id
+                for chunk in new_chunks
+            )
+
+        ordered_chunks = sorted(
+            chunks,
+            key=lambda chunk: chunk.stable_id,
+        )
+
+        return IncrementalProcessingResult(
+            chunks=ordered_chunks,
+            affected_chunk_ids=sorted(affected_chunk_ids),
+            removed_chunk_ids=sorted(removed_chunk_ids),
+            preserved_chunk_ids=sorted(preserved_chunk_ids),
+        )
 
     def process(self,artifact: RepositoryArtifact) -> list[KnowledgeChunk]:
         """Route an artifact to the appropriate processing strategy."""

@@ -2,9 +2,9 @@ from src.code_processing import CodeProcessing
 from src.ingestion_control import RepositoryArtifact
 
 
-def make_artifact(artifact_type: str,content: str,path: str,language: str | None = None,metadata: dict | None = None) -> RepositoryArtifact:
+def make_artifact(artifact_type: str,content: str,path: str,language: str | None = None,metadata: dict | None = None,stable_id: str = "artifact-123") -> RepositoryArtifact:
     return RepositoryArtifact(
-        stable_id="artifact-123",
+        stable_id=stable_id,
         repository="scrapy/scrapy",
         artifact_type=artifact_type,
         source_path_or_object_id=path,
@@ -556,3 +556,86 @@ def test_syntax_error_does_not_crash_processing() -> None:
     assert chunk.metadata["parser"] == "python_ast"
     assert chunk.metadata["structure"] == "module"
     assert "parse_error" in chunk.metadata
+
+def test_incremental_processing_preserves_unchanged_chunks() -> None:
+    processor = CodeProcessing()
+
+    unchanged = make_artifact(
+        "code",
+        "def unchanged():\n    return True\n",
+        "scrapy/unchanged.py",
+        stable_id="artifact-unchanged",
+    )
+    changed = make_artifact(
+        "code",
+        "def changed():\n    return False\n",
+        "scrapy/changed.py",
+        stable_id="artifact-changed",
+    )
+
+    previous_chunks = processor.process(unchanged) + processor.process(changed)
+    result = processor.process_incremental(
+        artifacts=[changed],
+        previous_chunks=previous_chunks,
+        affected_artifact_ids={changed.stable_id},
+    )
+
+    assert any(chunk.artifact_id == unchanged.stable_id for chunk in result.chunks)
+    assert all(
+        chunk.artifact_id != unchanged.stable_id
+        for chunk in result.chunks
+        if chunk.stable_id in result.affected_chunk_ids
+    )
+    assert result.preserved_chunk_ids == [previous_chunks[0].stable_id]
+    assert result.affected_chunk_ids == [result.chunks[-1].stable_id]
+
+
+def test_incremental_processing_removes_deleted_artifact_chunks() -> None:
+    processor = CodeProcessing()
+    deleted = make_artifact(
+        "code",
+        "def deleted():\n    return True\n",
+        "scrapy/deleted.py",
+        stable_id="artifact-deleted",
+    )
+    previous_chunks = processor.process(deleted)
+
+    result = processor.process_incremental(
+        artifacts=[],
+        previous_chunks=previous_chunks,
+        affected_artifact_ids=set(),
+        removed_artifact_ids={deleted.stable_id},
+    )
+
+    assert result.chunks == []
+    assert result.removed_chunk_ids == [previous_chunks[0].stable_id]
+
+
+def test_incremental_processing_reprocesses_only_affected_artifacts() -> None:
+    processor = CodeProcessing()
+    unchanged = make_artifact(
+        "code",
+        "def unchanged():\n    return True\n",
+        "scrapy/unchanged.py",
+        stable_id="artifact-unchanged",
+    )
+    changed = make_artifact(
+        "code",
+        "def changed():\n    return False\n",
+        "scrapy/changed.py",
+        stable_id="artifact-changed",
+    )
+    previous_chunks = processor.process(unchanged) + processor.process(changed)
+
+    result = processor.process_incremental(
+        artifacts=[changed],
+        previous_chunks=previous_chunks,
+        affected_artifact_ids={changed.stable_id},
+    )
+
+    assert len(result.chunks) == len(previous_chunks)
+    assert set(result.preserved_chunk_ids).isdisjoint(result.affected_chunk_ids)
+    assert all(
+        chunk.artifact_id in {unchanged.stable_id, changed.stable_id}
+        for chunk in result.chunks
+    )

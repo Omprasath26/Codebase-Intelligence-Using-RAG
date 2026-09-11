@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from src.code_processing import KnowledgeChunk
 from src.indexing import Indexing
 
@@ -172,14 +173,20 @@ def test_build_is_deterministic_for_same_chunks() -> None:
     ]
 
     first = indexer.build(chunks)
-    second = indexer.build(list(reversed(chunks)))
-
-    assert indexer.build_id(chunks) == indexer.build_id(
+    second = indexer.build(
         list(reversed(chunks))
     )
 
-    assert first["metadata"].chunk_count == (
-        second["metadata"].chunk_count
+    assert (
+        indexer.build_id(chunks)
+        == indexer.build_id(
+            list(reversed(chunks))
+        )
+    )
+
+    assert (
+        first["metadata"].chunk_count
+        == second["metadata"].chunk_count
     )
 
     assert np.array_equal(
@@ -187,8 +194,9 @@ def test_build_is_deterministic_for_same_chunks() -> None:
         second["embeddings"],
     )
 
-    assert first["chunk_id_by_position"] == (
-        second["chunk_id_by_position"]
+    assert (
+        first["chunk_id_by_position"]
+        == second["chunk_id_by_position"]
     )
 
 
@@ -210,8 +218,15 @@ def test_chunk_position_mapping_matches_sorted_chunks() -> None:
 
     state = indexer.build(chunks)
 
-    assert state["chunks"][0].stable_id == "chunk-1"
-    assert state["chunks"][1].stable_id == "chunk-2"
+    assert (
+        state["chunks"][0].stable_id
+        == "chunk-1"
+    )
+
+    assert (
+        state["chunks"][1].stable_id
+        == "chunk-2"
+    )
 
     assert state["chunk_id_by_position"] == {
         0: "chunk-1",
@@ -307,33 +322,86 @@ def test_build_rejects_empty_chunks() -> None:
     try:
         indexer.build([])
     except ValueError as exc:
-        assert str(exc) == "Cannot build indexes from empty chunks."
+        assert (
+            str(exc)
+            == "Cannot build indexes from empty chunks."
+        )
     else:
         raise AssertionError(
             "Expected ValueError for empty chunks."
         )
 
+
 class _FakeEmbeddingModel:
-    def encode(self, texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False):
+    """Deterministic embedding model used by incremental tests."""
+
+    def encode(
+        self,
+        texts,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+        show_progress_bar=False):
         vectors = []
+
         for text in texts:
-            value = float(sum(ord(char) for char in text) % 1000) + 1.0
-            vector = np.array([value, value + 1.0, value + 2.0], dtype=np.float32)
-            vector /= np.linalg.norm(vector)
+            value = (
+                float(
+                    sum(
+                        ord(char)
+                        for char in text
+                    )
+                    % 1000
+                )
+                + 1.0
+            )
+
+            vector = np.array(
+                [
+                    value,
+                    value + 1.0,
+                    value + 2.0,
+                ],
+                dtype=np.float32,
+            )
+
+            vector /= np.linalg.norm(
+                vector
+            )
+
             vectors.append(vector)
-        return np.asarray(vectors, dtype=np.float32)
+
+        return np.asarray(
+            vectors,
+            dtype=np.float32,
+        )
 
 
 def test_index_metadata_tracks_chunking_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.indexing.SentenceTransformer", lambda _: _FakeEmbeddingModel())
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
     indexer = Indexing(
         embedding_model="test-model",
         index_version="test-v1",
         chunking_version="chunk-v2",
     )
-    state = indexer.build([make_chunk("chunk-1", "return response")])
 
-    assert state["metadata"].chunking_version == "chunk-v2"
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    assert (
+        state["metadata"].chunking_version
+        == "chunk-v2"
+    )
+
     assert state["pipeline_version"] == {
         "index_version": "test-v1",
         "embedding_model": "test-model",
@@ -342,28 +410,52 @@ def test_index_metadata_tracks_chunking_version(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_incremental_index_reembeds_only_affected_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.indexing.SentenceTransformer", lambda _: _FakeEmbeddingModel())
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
     indexer = Indexing(
         embedding_model="test-model",
         index_version="test-v1",
         chunking_version="chunk-v1",
     )
+
     chunks = [
-        make_chunk("chunk-1", "return response"),
-        make_chunk("chunk-2", "return request"),
+        make_chunk(
+            "chunk-1",
+            "return response",
+        ),
+        make_chunk(
+            "chunk-2",
+            "return request",
+        ),
     ]
-    previous_state = indexer.build(chunks)
+
+    previous_state = indexer.build(
+        chunks
+    )
+
     updated_chunks = [
-        make_chunk("chunk-1", "return updated response"),
+        make_chunk(
+            "chunk-1",
+            "return updated response",
+        ),
         chunks[1],
     ]
 
     original = indexer._generate_embeddings
     calls = []
+
     def wrapped(texts):
         calls.append(list(texts))
         return original(texts)
-    monkeypatch.setattr(indexer, "_generate_embeddings", wrapped)
+
+    monkeypatch.setattr(
+        indexer,
+        "_generate_embeddings",
+        wrapped,
+    )
 
     state = indexer.prepare_incremental(
         previous_index_state=previous_state,
@@ -373,9 +465,17 @@ def test_incremental_index_reembeds_only_affected_chunks(monkeypatch: pytest.Mon
 
     assert len(calls) == 1
     assert len(calls[0]) == 1
-    assert "return updated response" in calls[0][0]
+    assert (
+        "return updated response"
+        in calls[0][0]
+    )
+
     assert state["faiss"].ntotal == 2
-    assert state["reembedded_chunk_ids"] == ["chunk-1"]
+
+    assert state[
+        "reembedded_chunk_ids"
+    ] == ["chunk-1"]
+
     assert np.array_equal(
         state["embeddings"][1],
         previous_state["embeddings"][1],
@@ -383,13 +483,29 @@ def test_incremental_index_reembeds_only_affected_chunks(monkeypatch: pytest.Mon
 
 
 def test_incremental_index_removes_deleted_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.indexing.SentenceTransformer", lambda _: _FakeEmbeddingModel())
-    indexer = Indexing(embedding_model="test-model")
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
     chunks = [
-        make_chunk("chunk-1", "return response"),
-        make_chunk("chunk-2", "return request"),
+        make_chunk(
+            "chunk-1",
+            "return response",
+        ),
+        make_chunk(
+            "chunk-2",
+            "return request",
+        ),
     ]
-    previous_state = indexer.build(chunks)
+
+    previous_state = indexer.build(
+        chunks
+    )
 
     state = indexer.prepare_incremental(
         previous_index_state=previous_state,
@@ -399,25 +515,47 @@ def test_incremental_index_removes_deleted_chunks(monkeypatch: pytest.MonkeyPatc
     )
 
     assert state["faiss"].ntotal == 1
-    assert [chunk.stable_id for chunk in state["chunks"]] == ["chunk-1"]
-    assert state["removed_chunk_ids"] == ["chunk-2"]
+
+    assert [
+        chunk.stable_id
+        for chunk in state["chunks"]
+    ] == ["chunk-1"]
+
+    assert state[
+        "removed_chunk_ids"
+    ] == ["chunk-2"]
 
 
 def test_incremental_index_rejects_incompatible_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.indexing.SentenceTransformer", lambda _: _FakeEmbeddingModel())
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
     previous = Indexing(
         embedding_model="model-a",
         index_version="v1",
         chunking_version="chunk-v1",
     )
-    state = previous.build([make_chunk("chunk-1", "return response")])
+
+    state = previous.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
 
     current = Indexing(
         embedding_model="model-b",
         index_version="v1",
         chunking_version="chunk-v1",
     )
-    with pytest.raises(ValueError, match="Embedding model"):
+
+    with pytest.raises(
+        ValueError,
+        match="Embedding model"):
         current.prepare_incremental(
             previous_index_state=state,
             chunks=state["chunks"],
@@ -426,9 +564,666 @@ def test_incremental_index_rejects_incompatible_pipeline(monkeypatch: pytest.Mon
 
 
 def test_build_id_includes_chunking_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.indexing.SentenceTransformer", lambda _: _FakeEmbeddingModel())
-    chunks = [make_chunk("chunk-1", "return response")]
-    first = Indexing(chunking_version="chunk-v1")
-    second = Indexing(chunking_version="chunk-v2")
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
 
-    assert first.build_id(chunks) != second.build_id(chunks)
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "return response",
+        )
+    ]
+
+    first = Indexing(
+        chunking_version="chunk-v1"
+    )
+
+    second = Indexing(
+        chunking_version="chunk-v2"
+    )
+
+    assert (
+        first.build_id(chunks)
+        != second.build_id(chunks)
+    )
+
+
+
+# Task36 — Atomic Index Update & Last-Known-Good Recovery
+
+
+
+def test_active_index_state_is_none_before_first_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    assert indexer.active_index_state is None
+    assert (
+        indexer.last_known_good_index_state
+        is None
+    )
+
+
+def test_commit_activates_valid_index_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    committed = indexer.commit_index_state(
+        state
+    )
+
+    assert committed is state
+    assert (
+        indexer.active_index_state
+        is state
+    )
+    assert (
+        indexer.last_known_good_index_state
+        is None
+    )
+
+
+def test_commit_preserves_previous_active_as_last_known_good(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    first_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        first_state
+    )
+
+    second_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return updated response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        second_state
+    )
+
+    assert (
+        indexer.active_index_state
+        is second_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is first_state
+    )
+
+
+def test_invalid_candidate_does_not_replace_active_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    valid_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        valid_state
+    )
+
+    invalid_state = dict(
+        valid_state
+    )
+
+    invalid_state["chunks"] = []
+
+    with pytest.raises(
+        ValueError,
+        match="at least one chunk",
+    ):
+        indexer.commit_index_state(
+            invalid_state
+        )
+
+    assert (
+        indexer.active_index_state
+        is valid_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is None
+    )
+
+
+def test_validation_rejects_faiss_count_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            ),
+            make_chunk(
+                "chunk-2",
+                "return request",
+            ),
+        ]
+    )
+
+    invalid_state = dict(
+        state
+    )
+
+    invalid_state[
+        "chunk_id_by_position"
+    ] = {
+        0: "chunk-1",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Chunk-position mapping",
+    ):
+        indexer.validate_index_state(
+            invalid_state
+        )
+
+
+def test_validation_rejects_embedding_count_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            ),
+            make_chunk(
+                "chunk-2",
+                "return request",
+            ),
+        ]
+    )
+
+    invalid_state = dict(
+        state
+    )
+
+    invalid_state["embeddings"] = (
+        state["embeddings"][:-1]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Embedding count",
+    ):
+        indexer.validate_index_state(
+            invalid_state
+        )
+
+
+def test_validation_rejects_bm25_count_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            ),
+            make_chunk(
+                "chunk-2",
+                "return request",
+            ),
+        ]
+    )
+
+    invalid_state = dict(
+        state
+    )
+
+    # Build a BM25 index containing only one document
+    # while the rest of the candidate still contains two.
+    invalid_state["bm25"] = (
+        indexer._build_bm25_index(
+            ["replacement"]
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="BM25 corpus count"):
+        indexer.validate_index_state(
+            invalid_state
+        )
+
+
+def test_validation_rejects_pipeline_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model",
+        index_version="test-v1",
+        chunking_version="chunk-v1",
+    )
+
+    state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    invalid_state = dict(
+        state
+    )
+
+    invalid_state[
+        "pipeline_version"
+    ] = {
+        "index_version": "different-v1",
+        "embedding_model": "test-model",
+        "chunking_version": "chunk-v1",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="pipeline version"):
+        indexer.validate_index_state(
+            invalid_state
+        )
+
+
+def test_validation_rejects_duplicate_chunk_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    first = make_chunk(
+        "chunk-1",
+        "return response",
+    )
+
+    second = make_chunk(
+        "chunk-2",
+        "return request",
+    )
+
+    state = indexer.build(
+        [first, second]
+    )
+
+    invalid_state = dict(
+        state
+    )
+
+    invalid_state["chunks"] = [
+        first,
+        first,
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate chunk IDs",
+    ):
+        indexer.validate_index_state(
+            invalid_state
+        )
+
+
+def test_recovery_requires_last_known_good_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="No last-known-good",
+    ):
+        indexer.recover_last_known_good()
+
+
+def test_recover_last_known_good_restores_previous_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    first_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        first_state
+    )
+
+    second_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return updated response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        second_state
+    )
+
+    recovered = (
+        indexer.recover_last_known_good()
+    )
+
+    assert recovered is first_state
+
+    assert (
+        indexer.active_index_state
+        is first_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is first_state
+    )
+
+
+def test_prepare_and_commit_incremental_activates_candidate(monkeypatch: pytest.MonkeyPatch,) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model",
+        index_version="test-v1",
+        chunking_version="chunk-v1",
+    )
+
+    initial_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            ),
+            make_chunk(
+                "chunk-2",
+                "return request",
+            ),
+        ]
+    )
+
+    indexer.commit_index_state(
+        initial_state
+    )
+
+    updated_chunks = [
+        make_chunk(
+            "chunk-1",
+            "return updated response",
+        ),
+        make_chunk(
+            "chunk-2",
+            "return request",
+        ),
+    ]
+
+    committed = (
+        indexer.prepare_and_commit_incremental(
+            previous_index_state=initial_state,
+            chunks=updated_chunks,
+            affected_chunk_ids={
+                "chunk-1"
+            },
+        )
+    )
+
+    assert (
+        indexer.active_index_state
+        is committed
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is initial_state
+    )
+
+    assert committed[
+        "reembedded_chunk_ids"
+    ] == ["chunk-1"]
+
+
+def test_rebuild_and_commit_activates_full_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    rebuilt_state = (
+        indexer.rebuild_and_commit(
+            [
+                make_chunk(
+                    "chunk-1",
+                    "return response",
+                )
+            ]
+        )
+    )
+
+    assert (
+        indexer.active_index_state
+        is rebuilt_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is None
+    )
+
+
+def test_failed_incremental_prepare_does_not_change_active_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    initial_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        initial_state
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Embedding model"):
+        incompatible_indexer = Indexing(
+            embedding_model="different-model"
+        )
+
+        incompatible_indexer.prepare_and_commit_incremental(
+            previous_index_state=initial_state,
+            chunks=initial_state["chunks"],
+            affected_chunk_ids=set(),
+        )
+
+    assert (
+        indexer.active_index_state
+        is initial_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is None
+    )
+
+
+def test_failed_candidate_validation_preserves_last_known_good(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.indexing.SentenceTransformer",
+        lambda _: _FakeEmbeddingModel(),
+    )
+
+    indexer = Indexing(
+        embedding_model="test-model"
+    )
+
+    first_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        first_state
+    )
+
+    second_state = indexer.build(
+        [
+            make_chunk(
+                "chunk-1",
+                "return updated response",
+            )
+        ]
+    )
+
+    indexer.commit_index_state(
+        second_state
+    )
+
+    invalid_state = dict(
+        second_state
+    )
+
+    invalid_state[
+        "pipeline_version"
+    ] = {
+        "index_version": "invalid",
+        "embedding_model": "test-model",
+        "chunking_version": "v1",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="pipeline version"):
+        indexer.commit_index_state(
+            invalid_state
+        )
+
+    assert (
+        indexer.active_index_state
+        is second_state
+    )
+
+    assert (
+        indexer.last_known_good_index_state
+        is first_state
+    )

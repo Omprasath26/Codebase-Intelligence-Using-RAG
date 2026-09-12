@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -26,6 +26,59 @@ class QueryRequest(BaseModel):
     repository: str | None = None
     ref: str | None = None
     conversation_id: str | None = None
+
+
+class SyncRequest(BaseModel):
+    """Structured request submitted to the manual synchronization API."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repository: str = Field(min_length=1)
+    ref: str = Field(min_length=1)
+
+
+class SyncResponse(BaseModel):
+    """Structured response returned by the manual synchronization API."""
+
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+    repository: str
+    ref: str
+    result: Any
+
+
+class SyncHandler(Protocol):
+    """Protocol for the manual synchronization boundary."""
+
+    def __call__(self, request: SyncRequest) -> Any:
+        """Execute one repository synchronization."""
+        ...
+
+
+class APISyncService:
+    """Adapter around the injected repository synchronization callable."""
+
+    def __init__(self, handler: SyncHandler | None = None) -> None:
+        if handler is not None and not callable(handler):
+            raise TypeError("handler must be callable or None.")
+        self._handler = handler
+
+    @property
+    def configured(self) -> bool:
+        """Return whether a synchronization handler is configured."""
+        return self._handler is not None
+
+    def execute(self, request: SyncRequest) -> Any:
+        """Execute one manual synchronization."""
+        if not isinstance(request, SyncRequest):
+            raise TypeError("request must be a SyncRequest.")
+        if self._handler is None:
+            raise RuntimeError("Sync service is not configured.")
+        try:
+            return self._handler(request)
+        except Exception as exc:
+            raise RuntimeError("Synchronization failed.") from exc
 
 
 class QueryResponse(BaseModel):
@@ -426,7 +479,7 @@ class RAGQueryPipeline:
         return filters
 
 
-def create_app(query_service: APIQueryService | None = None) -> FastAPI:
+def create_app(query_service: APIQueryService | None = None,sync_service: APISyncService | None = None) -> FastAPI:
     """Create the FastAPI application.
 
     The query service is injected so the HTTP layer remains independent
@@ -438,6 +491,11 @@ def create_app(query_service: APIQueryService | None = None) -> FastAPI:
         if query_service is not None
         else APIQueryService()
     )
+    synchronization_service = (
+        sync_service
+        if sync_service is not None
+        else APISyncService()
+    )
 
     app = FastAPI(
         title="Codebase Intelligence System",
@@ -445,6 +503,7 @@ def create_app(query_service: APIQueryService | None = None) -> FastAPI:
     )
 
     app.state.query_service = service
+    app.state.sync_service = synchronization_service
 
     @app.post(
         "/query",
@@ -492,6 +551,33 @@ def create_app(query_service: APIQueryService | None = None) -> FastAPI:
             result=result,
         )
 
+    @app.post(
+        "/sync",
+        response_model=SyncResponse,
+    )
+    def sync(request: SyncRequest) -> SyncResponse:
+        """Trigger one manual repository synchronization."""
+        correlation_id = str(uuid4())
+        try:
+            result = synchronization_service.execute(request)
+        except RuntimeError as exc:
+            if str(exc) == "Sync service is not configured.":
+                raise HTTPException(
+                    status_code=503,
+                    detail="Sync service is not configured.",
+                ) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Synchronization failed.",
+            ) from exc
+
+        return SyncResponse(
+            correlation_id=correlation_id,
+            repository=request.repository,
+            ref=request.ref,
+            result=result,
+        )
+
     @app.get(
         "/health",
         response_model=HealthResponse,
@@ -514,6 +600,5 @@ def create_app(query_service: APIQueryService | None = None) -> FastAPI:
         )
 
     return app
-
 
 app = create_app()
